@@ -5,3 +5,7 @@
 **experimental**
 integrations/persona_vectors/persona_vectors/
 glp.egg-info/
+*.out
+*.json
+*.png
+results/

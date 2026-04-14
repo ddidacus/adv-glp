@@ -53,7 +53,10 @@ def save_acts(
         )
         minibatch = {k: v.to(hf_model.device) for k, v in minibatch.items()}
         with TraceDict(hf_model, **tracedict_config) as miniret:
-            hf_model(**minibatch)
+            # Run only the base model (skip lm_head) to avoid
+            # allocating the huge (batch, seq_len, vocab_size) logits tensor.
+            base = getattr(hf_model, 'model', hf_model)
+            base(**minibatch)
         miniret = [getattr(miniret[l], retain_attr) for l in tracedict_config["layers"]]
         miniret = [x[0] if type(x) is tuple else x for x in miniret]
         miniret = torch.stack(miniret)
