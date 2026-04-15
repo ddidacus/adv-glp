@@ -17,20 +17,35 @@ def fm_prepare(scheduler, model_input, noise, u=None, generator=None):
     # sanity check
     assert isinstance(scheduler, FlowMatchEulerDiscreteScheduler), "Only FlowMatchEulerDiscreteScheduler is supported"
     assert model_input.ndim == 3, f"Expected (batch, seq, dim), got shape {model_input.shape}"
-    # use uniform weighting_scheme; doesn't implement logit_normal
+
+    # random u -> random indices from the scheduler -> random noising steps (for learning)
+    # scheduler.timesteps (1000,)
+    # scheduler.sigmas (1000,)
+    
+    scheduler_sigmas = torch.linspace(0, 1.0, 1000)
+
     if u is None:
         batch_size = model_input.shape[0]
         u = torch.rand(size=(batch_size,), generator=generator)
-    indices = (u * len(scheduler.timesteps)).long()
+        indices = (u * len(scheduler.timesteps)).long()
+        sigmas = scheduler.sigmas[indices].flatten()
+
+    # fixed u -> no scheduler, those are just the sigmas
+    else:
+        # sigmas = u.clone()
+        indices = (u * len(scheduler.timesteps)).long()
+        sigmas = scheduler_sigmas[indices].flatten()
+
     timesteps = scheduler.timesteps[indices]
-    sigmas = scheduler.sigmas[indices].flatten()
     timesteps = timesteps.to(model_input.device)
     sigmas = sigmas.to(model_input.device)
     timesteps = timesteps[:, None, None]
     sigmas = sigmas[:, None, None]
+
     # interpolate between model_input and noise
     noisy_model_input = (1.0 - sigmas) * model_input.to(sigmas.dtype) + sigmas * noise
     noisy_model_input = noisy_model_input.to(model_input.dtype)
+    
     # the target in flow matching is the "velocity"
     target = noise - model_input
     return noisy_model_input, target, timesteps, {"sigmas": sigmas, "noise": noise, "u": u}
