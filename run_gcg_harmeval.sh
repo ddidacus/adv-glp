@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH -J ift6164-gcg-harmeval
 #SBATCH --nodes=1
-#SBATCH --gres=gpu:40gb:4
+#SBATCH --gres=gpu:80gb:4
 #SBATCH --cpus-per-task=4
 #SBATCH --ntasks=4
 #SBATCH --constraint=ampere|lovelace|hopper

@@ -55,6 +55,7 @@ def _build_config(draft_model, draft_tokenizer, num_steps: int) -> GCGConfig:
         probe_sampling_config=probe_sampling_config,
         num_steps=num_steps,
         early_stop=True,
+        batch_size=8,
     )
 
 
