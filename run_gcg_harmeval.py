@@ -9,6 +9,7 @@ Usage (merge shards after all GPU jobs finish):
     python run_gcg_harmeval.py --merge --out_dir=results/harmeval_gcg
 """
 
+import json
 import os
 import glob
 from pathlib import Path
@@ -55,7 +56,9 @@ def _build_config(draft_model, draft_tokenizer, num_steps: int) -> GCGConfig:
         probe_sampling_config=probe_sampling_config,
         num_steps=num_steps,
         early_stop=True,
-        batch_size=8,
+        search_width=64,
+        topk=64,
+        seed=42,
     )
 
 
@@ -100,18 +103,35 @@ def run(
 
     print(f"[GPU {gpu_id}] Running GCG on {len(questions)} questions...")
 
-    records = []
-    for question in tqdm(questions, desc=f"GPU {gpu_id}"):
-        result = nanogcg.run(target_model, target_tokenizer, question, target, config)
-        records.append(
-            {
+    # load checkpoint if it exists
+    ckpt_path = Path(out_dir) / f"checkpoint_{gpu_id}.jsonl"
+    ckpt_path.parent.mkdir(parents=True, exist_ok=True)
+    records: list[dict] = []
+    done_questions: set[str] = set()
+    if ckpt_path.exists():
+        with open(ckpt_path) as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    rec = json.loads(line)
+                    records.append(rec)
+                    done_questions.add(rec["question"])
+        print(f"[GPU {gpu_id}] Resuming from checkpoint: {len(done_questions)} already done")
+
+    remaining = [q for q in questions if q not in done_questions]
+    with open(ckpt_path, "a") as ckpt_f:
+        for question in tqdm(remaining, desc=f"GPU {gpu_id}", initial=len(done_questions), total=len(questions)):
+            result = nanogcg.run(target_model, target_tokenizer, question, target, config)
+            rec = {
                 "question": question,
                 "target": target,
                 "attack": result.best_string,
                 "adv_prompt": question + result.best_string,
                 "best_loss": float(result.best_loss),
             }
-        )
+            records.append(rec)
+            ckpt_f.write(json.dumps(rec) + "\n")
+            ckpt_f.flush()
 
     dataset = Dataset.from_list(records)
     shard_dir.mkdir(parents=True, exist_ok=True)
