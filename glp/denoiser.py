@@ -199,7 +199,13 @@ class Denoiser(nn.Module):
         layer_idx = torch.full((latents.shape[0],), layer_idx, device=latents.device) if isinstance(layer_idx, int) else layer_idx
         # move device and dtype
         device, dtype = latents.device, latents.dtype
-        latents = latents.to(device=self.device, dtype=self.dtype)
+        # self.device/self.dtype are only set when Denoiser.to() is invoked directly;
+        # nn.Module.to() on a parent uses _apply and skips the override, so fall back
+        # to the actual parameter device/dtype of the underlying model.
+        param = next(self.model.parameters(), None)
+        target_device = self.device if self.device is not None else (param.device if param is not None else device)
+        target_dtype = self.dtype if self.dtype is not None else (param.dtype if param is not None else dtype)
+        latents = latents.to(device=target_device, dtype=target_dtype)
         # reshape to (batch*seq, dim) 
         # since denoiser does single-token modeling
         b, s, d = latents.shape
@@ -248,6 +254,10 @@ class GLP(nn.Module):
     def load_pretrained(self, path, name=None):
         path = Path(path)
         self.denoiser.load_pretrained(path, name=name)
+
+    def log_prob(self, latents, **kwargs):
+        """Compute log p(x) under the learned distribution. See flow_matching.log_prob."""
+        return flow_matching.log_prob(self, latents, **kwargs)
 
     def forward(
         self,
