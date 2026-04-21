@@ -22,7 +22,7 @@ def save_acts(
     text: list[str],
     tracedict_config: dict,
     padding_side: str = "right",
-    token_idx: Literal["last", "all"] = "last",
+    token_idx: Literal["last", "mean", "all"] = "last",
     batch_size: int = 10,
     max_length: int = 2048
 ):
@@ -42,7 +42,7 @@ def save_acts(
         print(f"WARNING: updating tokenizer padding_side to {padding_side}")
         hf_tokenizer.padding_side = padding_side
     ret = []
-    for i in tqdm(range(0, len(text), batch_size)):
+    for i in range(0, len(text), batch_size):
         start, end = i, min(i + batch_size, len(text))
         minibatch = hf_tokenizer(
             text[start:end], 
@@ -64,6 +64,12 @@ def save_acts(
         if token_idx == "last":
             last_token_idx = -1 if padding_side == "left" else (minibatch["attention_mask"].sum(dim=1) - 1)
             miniret = miniret[torch.arange(miniret.shape[0]), :, last_token_idx, :].detach().cpu()
+        elif token_idx == "mean":
+            # miniret: (B, L, S, D); mean-pool over non-padding tokens
+            mask    = minibatch["attention_mask"].float()          # (B, S)
+            lengths = mask.sum(dim=1, keepdim=True)                # (B, 1)
+            miniret = (miniret * mask[:, None, :, None]).sum(2) / lengths[:, :, None]  # (B, L, D)
+            miniret = miniret.detach().cpu()
         elif token_idx == "all":
             miniret = miniret.detach().cpu()
         else:

@@ -1,7 +1,6 @@
 import math
 import numpy as np
 import torch
-from tqdm import tqdm
 from types import SimpleNamespace
 
 from diffusers import FlowMatchEulerDiscreteScheduler
@@ -80,7 +79,7 @@ def sample(
     """
     model.scheduler.set_timesteps(num_timesteps)
     model.scheduler.timesteps = model.scheduler.timesteps.to(latents.device)
-    for i, timestep in tqdm(enumerate(model.scheduler.timesteps)):
+    for i, timestep in enumerate(model.scheduler.timesteps):
         timesteps = timestep.repeat(latents.shape[0], 1)
         noise_pred = model.denoiser(
             latents=latents,
@@ -105,7 +104,7 @@ def sample_on_manifold(
     """
     start_latents = latents.clone()
     model.scheduler.set_timesteps(num_timesteps)
-    for i, timestep in tqdm(enumerate(model.scheduler.timesteps)):
+    for i, timestep in enumerate(model.scheduler.timesteps):
         if start_timestep is not None and torch.is_tensor(start_timestep):
             # inject original latents until start_timestep
             timestep_mask = start_timestep[:, 0, 0] <= timestep
@@ -155,7 +154,7 @@ def _log_prob_hutchinson(
 
     log_det_flow = torch.zeros(b, device=device, dtype=torch.float32)
 
-    for i in tqdm(range(num_steps), desc="log_prob ODE"):
+    for i in range(num_steps):
         sigma = sigmas[i].item()
         index = min(int(sigma * 1000), 999)
         timestep_val = model.scheduler.timesteps[index].item()
@@ -281,7 +280,7 @@ def dte_posterior(
     # Set grid to [0.01*ref_mode, 10*ref_mode] to cover both in-dist and OOD
     ref_mode = (mean_dist_ref ** 2) / max(d_eff, 1)
     sigma2_min = max(ref_mode * 0.01, eps)
-    sigma2_max = ref_mode * 10.0
+    sigma2_max = ref_mode * 100.0
     sigma2_np = np.linspace(sigma2_min, sigma2_max, num_sigma_bins)
 
     beta_test = (mean_dist_test ** 2) / 2.0  # (B,)

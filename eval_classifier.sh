@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH -J ift6164-classifier
 #SBATCH --nodes=1
-#SBATCH --gres=gpu:80gb:4
+#SBATCH --gres=gpu:40gb:4
 #SBATCH --cpus-per-task=2
 #SBATCH --ntasks=4
 #SBATCH --constraint=ampere|lovelace|hopper
@@ -16,12 +16,12 @@ source .venv/bin/activate
 
 CONFIG="${1:-eval_config.yaml}"
 
-PID_LIST=""
+# PID_LIST=""
 for gpu_id in 0 1 2 3; do
     echo "Launching eval_classifier on GPU $gpu_id"
     python eval_classifier.py run --config="$CONFIG" --gpu_id="$gpu_id" &
     PID_LIST+=" $!"
-    sleep 1
+    sleep 5
 done
 trap "kill $PID_LIST" SIGINT
 echo "Computing log-probs..."
