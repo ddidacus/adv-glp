@@ -172,7 +172,7 @@ def extract_log_probs(
     reference_activations: torch.Tensor | None = None,
     K: int = 5,
     num_sigma_bins: int = 100,
-    normalize: bool = False,
+    normalize: bool = True,
     precomputed_activations: torch.Tensor | None = None,
 ) -> dict:
     """ extract log probs depending on method (path integral / dte non-parametric posterior)"""
@@ -291,7 +291,7 @@ def main(
     glp_sample_steps: int = 100,
     dte_K: int = 5,
     dte_num_sigma_bins: int = 100,
-    normalize: bool = False,
+    normalize: bool = True,
     noise_level: float = 0.5,
     rec_num_timesteps: int = 100,
     num_gpus: int = 4,
@@ -818,7 +818,7 @@ if __name__ == "__main__":
             glp_sample_steps=cfg.get("glp_sample_steps", 100),
             dte_K=cfg.get("dte_K", 5),
             dte_num_sigma_bins=cfg.get("dte_num_sigma_bins", 100),
-            normalize=cfg.get("normalize", False),
+            normalize=cfg.get("normalize", True),
             noise_level=cfg.get("noise_level", 0.5),
             rec_num_timesteps=cfg.get("rec_num_timesteps", 100),
             num_gpus=cfg.get("num_gpus", 4),
