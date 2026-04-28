@@ -24,7 +24,8 @@ def save_acts(
     padding_side: str = "right",
     token_idx: Literal["last", "mean", "all"] = "last",
     batch_size: int = 10,
-    max_length: int = 2048
+    max_length: int = 2048,
+    use_tqdm: bool = False
 ):
     # set up tracedict
     tracedict_config = dict(tracedict_config)
@@ -42,7 +43,9 @@ def save_acts(
         print(f"WARNING: updating tokenizer padding_side to {padding_side}")
         hf_tokenizer.padding_side = padding_side
     ret = []
-    for i in range(0, len(text), batch_size):
+    pbar = range(0, len(text), batch_size)
+    if use_tqdm: pbar = tqdm(pbar)
+    for i in pbar:
         start, end = i, min(i + batch_size, len(text))
         minibatch = hf_tokenizer(
             text[start:end], 

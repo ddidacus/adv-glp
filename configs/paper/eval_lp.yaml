@@ -1,8 +1,7 @@
-num_samples: 512
+# num_samples: 512
 layers: [7, 13, 15]
 model: "1b"
 # data: "all_semantic"    # harmeval | harmeval_gcg | jailbreakbench | sgbench | vanilla_wildjailbreak | all_semantic
-hf_dataset: "ddidacus/guard-glp-data"
 # good_data: fineweb
 # data_selection: all_semantic  # harmful counterpart from same dataset
 # metric_data: "vanilla_wildjailbreak"

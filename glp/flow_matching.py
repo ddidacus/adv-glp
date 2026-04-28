@@ -136,8 +136,9 @@ def _log_prob_hutchinson(
     """CNF change-of-variables log p(x) via Hutchinson trace estimation."""
     device = latents.device
     dtype = latents.dtype
-    b, s, d = latents.shape
+    b, s, d = latents.shape # B, L, D
 
+    # normalize x_in
     if normalize:
         x = model.normalizer.normalize(latents, layer_idx=layer_idx)
         var = model.normalizer.get_layer_stat(model.normalizer.var, layer_idx)
@@ -166,17 +167,24 @@ def _log_prob_hutchinson(
         for j in range(num_hutchinson_samples):
             eps = torch.randn(b, s, d, device=device, dtype=dtype, generator=generator)
             v_dot_eps = (v * eps).sum()
+            # Intuitively: the velocity is learned to be subtracted, 
+            # hence we maximize the velocity in order to move back to x_in.
+            # Average over multiple traces on the way back. These gradients are accumulated
+            # as the determinant
+            # formula: grad = grad_{x_in} (denoiser(x_s) * noise)
             grad = torch.autograd.grad(
                 v_dot_eps, x_in,
                 retain_graph=(j < num_hutchinson_samples - 1),
             )[0]
             trace_est = trace_est + (grad * eps).sum(dim=(-2, -1)).float()
         trace_est = trace_est / num_hutchinson_samples
-
+        # progressively noise x_in with the denoiser's timestep noise
         x = x_in.detach() + dt * v.detach()
+        # to compute the trace 
         log_det_flow = log_det_flow - dt * trace_est
 
     z = x.detach()
+    # noisy sample logp
     log_p_base = -0.5 * (d * s * math.log(2 * math.pi) + (z.float() ** 2).sum(dim=(-2, -1)))
     log_prob_val = log_p_base + log_det_flow + log_det_normalize
 

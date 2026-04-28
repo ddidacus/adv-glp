@@ -1,10 +1,6 @@
 noise_level: 0.0
 num_timesteps: 200
-num_samples: 512        # per GPU
-layers: [1, 7, 15]
-method: tsne            # for aggregate_plot_by_component.py: pca | tsne
+layers: [1, 7, 11, 15]
+method: tsne
 model: "1b"
-# data: "all_semantic"             # harmeval | harmeval_gcg | jailbreakbench | sgbench | vanilla_wildjailbreak | all
-# hf_dataset: "ddidacus/guard-glp-data"
-data_selection: "all_semantic"
 out_dir: "results/paper-viz-tsne"

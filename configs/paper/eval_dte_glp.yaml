@@ -1,4 +1,4 @@
-num_samples: 512
+# num_samples: 64
 layers: [7, 13, 15]
 model: "1b"
 out_dir: "results/paper-eval-dte-glp"
@@ -8,7 +8,6 @@ num_gpus: 4
 # train split      → good (in-distribution) prompts + DTE reference
 # calibration split → Youden-J threshold calibration (and linear-probe training)
 # test split        → final metrics
-hf_dataset: "ddidacus/guard-glp-data"
 
 # Scoring method: hutchinson | dte | dte_glp
 method: "dte_glp"
@@ -17,6 +16,6 @@ glp_sample_steps: 100
 # DTE-specific (ignored for dte_glp reference, used for KNN scoring)
 reference_num_samples: 4096 
 dte_K: 8
-dte_num_sigma_bins: 512
+dte_num_sigma_bins: 1024
 noise_level: 0.0
 num_timesteps: 200
