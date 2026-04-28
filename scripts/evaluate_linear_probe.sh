@@ -24,11 +24,13 @@ PROBE_WD=$(python -c "import yaml; print(yaml.safe_load(open('$CONFIG')).get('pr
 PROBE_BATCH=$(python -c "import yaml; print(yaml.safe_load(open('$CONFIG')).get('probe_batch_size', 64))")
 PROBE_DEVICE=$(python -c "import yaml; print(yaml.safe_load(open('$CONFIG')).get('probe_device', 'cpu'))")
 
+NUM_GPUS=$(python -c "import yaml; print(yaml.safe_load(open('$CONFIG')).get('num_gpus', 4))")
+
 # Pass 1: extract activations in parallel across GPUs
 PID_LIST=""
-for gpu_id in 0 1 2 3; do
+for gpu_id in $(seq 0 $((NUM_GPUS - 1))); do
     echo "Launching activation extraction on GPU $gpu_id"
-    python scripts/evaluate_linear_probe.py run --config="$CONFIG" --gpu_id="$gpu_id" &
+    python scripts/eval_linear_probe.py run --config="$CONFIG" --gpu_id="$gpu_id" &
     PID_LIST+=" $!"
     sleep 5
 done
@@ -39,7 +41,7 @@ echo "All GPU jobs finished."
 
 # Pass 2: train probes + evaluate (single job, no GPU needed)
 echo "Training probes and computing metrics..."
-python scripts/evaluate_linear_probe.py aggregate \
+python scripts/eval_linear_probe.py aggregate \
     --out_dir="$OUT_DIR" \
     --probe_lr="$PROBE_LR" \
     --probe_epochs="$PROBE_EPOCHS" \

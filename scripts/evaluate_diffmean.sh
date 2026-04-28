@@ -17,14 +17,15 @@ source .venv/bin/activate
 CONFIG="${1:-configs/eval_diffmean.yaml}"
 
 OUT_DIR=$(python -c "import yaml; print(yaml.safe_load(open('$CONFIG'))['out_dir'])")
+NUM_GPUS=$(python -c "import yaml; print(yaml.safe_load(open('$CONFIG')).get('num_gpus', 4))")
 
 # Pass 1: extract activations in parallel across GPUs
 PID_LIST=""
-for gpu_id in 0 1 2 3; do
+for gpu_id in $(seq 0 $((NUM_GPUS - 1))); do
     echo "Launching activation extraction on GPU $gpu_id"
     python scripts/evaluate_diffmean.py run --config="$CONFIG" --gpu_id="$gpu_id" &
     PID_LIST+=" $!"
-    sleep 5
+    sleep 1
 done
 trap "kill $PID_LIST" SIGINT
 echo "Extracting activations..."

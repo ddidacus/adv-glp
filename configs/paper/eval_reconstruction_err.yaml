@@ -10,6 +10,7 @@ method: reconstruction_error
 noise_level: 0.0      # how much noise to add before denoising (0=no noise, 1=full noise)
 num_timesteps: 200
 rec_num_timesteps: 50  # denoising steps for reconstruction
+num_gpus: 8
 
 # Hutchinson's measure method
 # method: "hutchinson"

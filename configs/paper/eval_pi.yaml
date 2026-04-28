@@ -19,6 +19,7 @@ method: "hutchinson"
 
 # to average for trace estimation
 num_hutchinson_samples: 8
+num_gpus: 8
 
 # to extract activations
 batch_size: 128

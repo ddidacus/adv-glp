@@ -2,7 +2,7 @@
 layers: [7, 13, 15]
 model: "1b"
 out_dir: "results/paper-eval-dte-glp"
-num_gpus: 4
+num_gpus: 8
 
 # Use the Guard-GLP HF dataset directly.
 # train split      → good (in-distribution) prompts + DTE reference
@@ -15,7 +15,7 @@ glp_sample_steps: 100
 
 # DTE-specific (ignored for dte_glp reference, used for KNN scoring)
 reference_num_samples: 4096 
-dte_K: 8
-dte_num_sigma_bins: 1024
+dte_K: 16
+dte_num_sigma_bins: 512
 noise_level: 0.0
 num_timesteps: 200

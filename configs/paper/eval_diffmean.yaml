@@ -4,3 +4,4 @@ model: "1b"
 # data: "all_semantic"    # harmeval | harmeval_gcg | jailbreakbench | sgbench | vanilla_wildjailbreak | all_semantic
 # metric_data: "vanilla_wildjailbreak"
 out_dir: "results/paper-eval-diffmean"
+num_gpus: 8
