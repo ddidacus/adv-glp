@@ -38,14 +38,15 @@ def extract_activations(
     diffusion_model,
     layers: list,
     device: str = "cuda:0",
-    batch_size: int = 8) -> dict:
+    batch_size: int = 8,
+    token_pooling:str = "last") -> dict:
 
     activations = save_acts(
         hf_model=llm_model,
         hf_tokenizer=llm_tokenizer,
         text=texts,
         tracedict_config=diffusion_model.tracedict_config,
-        token_idx="mean",
+        token_idx=token_pooling,
         batch_size=batch_size,
         use_tqdm=True
     )  # (N, L, D)
@@ -99,7 +100,7 @@ def extract_activations(
     }
 
 def encode_prompts(prompts, batch_size, llm_model, llm_tokenizer, diffusion_model, layers: list,
-                   noise_level: float, num_timesteps: int, device="cuda:0") -> dict:
+                   noise_level: float, num_timesteps: int, device="cuda:0", token_pooling:str = "last") -> dict:
     return extract_activations(
         texts=prompts,
         noise_level=noise_level,
@@ -110,6 +111,7 @@ def encode_prompts(prompts, batch_size, llm_model, llm_tokenizer, diffusion_mode
         batch_size=batch_size,
         device=device,
         layers=layers,
+        token_idx=token_pooling
     )
 
 def extract_main(
@@ -120,6 +122,7 @@ def extract_main(
     out_dir: str,
     model: str = "1b",
     num_gpus: int = 4,
+    token_pooling: str = "last"
 ):
     torch.manual_seed(42)
     random.seed(42)
@@ -169,13 +172,13 @@ def extract_main(
 
     print(f"======= Encoding the good set (GPU {gpu_id}) =======")
     result_good = encode_prompts(good_set, batch_size, llm_model, llm_tokenizer, diffusion_model,
-                                 layers=layers, noise_level=noise_level, num_timesteps=num_timesteps, device=device)
+                                 layers=layers, noise_level=noise_level, num_timesteps=num_timesteps, device=device, token_pooling=token_pooling)
     activations_good_set    = result_good["activations"]
     reconstructed_good_set  = result_good["reconstructed_activations"]
 
     print(f"======= Encoding the bad set (GPU {gpu_id}) =======")
     result_bad = encode_prompts(bad_set, batch_size, llm_model, llm_tokenizer, diffusion_model,
-                                layers=layers, noise_level=noise_level, num_timesteps=num_timesteps, device=device)
+                                layers=layers, noise_level=noise_level, num_timesteps=num_timesteps, device=device, token_pooling=token_pooling)
     activations_bad_set    = result_bad["activations"]
     reconstructed_bad_set  = result_bad["reconstructed_activations"]
 
@@ -485,6 +488,7 @@ if __name__ == "__main__":
             out_dir=cfg["out_dir"],
             model=cfg["model"],
             num_gpus=cfg.get("num_gpus", 4),
+            token_pooling=cfg.get("token_pooling", "last")
         )
 
     fire.Fire(run)

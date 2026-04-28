@@ -15,9 +15,10 @@ export UV_CACHE_DIR=$SCRATCH/.cache
 source .venv/bin/activate
 
 CONFIG="${1:-configs/paper/eval_pi.yaml}"
+NUM_GPUS=4
 
 PID_LIST=""
-for gpu_id in 0 1 2 3; do
+for gpu_id in $(seq 0 $((NUM_GPUS - 1))); do
     echo "Launching eval_classifier on GPU $gpu_id"
     python scripts/evaluate_classifier.py run --config="$CONFIG" --gpu_id="$gpu_id" &
     PID_LIST+=" $!"

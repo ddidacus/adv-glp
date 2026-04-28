@@ -7,7 +7,7 @@
 #SBATCH --constraint=ampere|lovelace|hopper
 #SBATCH --mem=64G
 #SBATCH --partition=long
-#SBATCH --time=3:00:00
+#SBATCH --time=4:00:00
 
 export HF_HOME=$SCRATCH/.cache
 export UV_CACHE_DIR=$SCRATCH/.cache
