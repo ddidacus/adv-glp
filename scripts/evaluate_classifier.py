@@ -417,7 +417,10 @@ def main(
                 diffusion_model, noise,
                 num_timesteps=glp_sample_steps,
                 layer_idx=actual_layer,
-            )  # (N_ref, 1, D)
+            )  # (N_ref, 1, D) — in normalized space
+            # denormalize so that dte_posterior's normalize=True brings them
+            # back to the same space as real LLM activations (avoids double normalization)
+            sampled = diffusion_model.normalizer.denormalize(sampled, layer_idx=actual_layer)
             per_layer_refs.append(sampled.cpu())
         # stack into (N_ref, num_layers, D) — same layout as fineweb reference_activations
         reference_activations = torch.cat(per_layer_refs, dim=1).to(device)
@@ -539,7 +542,7 @@ def main(
             cal_bad_logp=cal_bad_logp,
             cal_bad_probs=cal_bad_probs,
         )
-        if method == "dte":
+        if method in ("dte", "dte_glp"):
             save_dict.update(
                 good_expected_sigma       = torch.cat([r["expected_sigma"] for r in cal_good_results],       dim=0),
                 good_eval_expected_sigma  = torch.cat([r["expected_sigma"] for r in test_good_results],  dim=0),
