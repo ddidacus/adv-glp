@@ -612,8 +612,9 @@ def aggregate(out_dir: str) -> dict:
     print(f"  good_cal: {n_good_cal}  |  good_eval: {n_good_eval}  |  bad: {n_bad}  |  "
           f"metric_bad: {n_metric_bad}  |  method: {method}  |  layers: {layers}")
 
-    main_labels = np.concatenate([np.ones(n_good_eval), np.zeros(n_bad)])
-    cal_labels  = np.concatenate([np.ones(n_good_cal),  np.zeros(n_metric_bad)])
+    # positive class = adversarial (bad=1, good=0)
+    main_labels = np.concatenate([np.zeros(n_good_eval), np.ones(n_bad)])
+    cal_labels  = np.concatenate([np.zeros(n_good_cal),  np.ones(n_metric_bad)])
     results: dict = {"config": cfg, "n_good_cal": n_good_cal, "n_good_eval": n_good_eval,
                      "n_bad": n_bad, "n_metric_bad": n_metric_bad,
                      "per_layer": {}, "aggregate": {}}
@@ -627,9 +628,10 @@ def aggregate(out_dir: str) -> dict:
             cal_g_scores, cal_b_scores = g_scores, b_scores
         scores     = np.concatenate([g_scores, b_scores])
         cal_scores = np.concatenate([cal_g_scores, cal_b_scores])
-        cal_lbl    = np.concatenate([np.ones(len(cal_g_scores)), np.zeros(len(cal_b_scores))])
+        # positive class = adversarial (bad=1, good=0)
+        cal_lbl    = np.concatenate([np.zeros(len(cal_g_scores)), np.ones(len(cal_b_scores))])
         youden_thr = _find_best_f1_threshold(cal_lbl, cal_scores)
-        eval_lbl   = np.concatenate([np.ones(len(g_scores)), np.zeros(len(b_scores))])
+        eval_lbl   = np.concatenate([np.zeros(len(g_scores)), np.ones(len(b_scores))])
         print(f"\n  {label_str}  good={g_scores.mean():.4f}±{g_scores.std():.4f}  "
               f"bad={b_scores.mean():.4f}±{b_scores.std():.4f}")
         m = _classification_metrics(eval_lbl, scores, label_str, best_f1_threshold=youden_thr)
@@ -660,9 +662,9 @@ def aggregate(out_dir: str) -> dict:
             mb_err = metric_bad_recon_errors[:, li].numpy()
             print(f"\n  Layer {layer}  "
                   f"recon_error good={g_err.mean():.3f}±{g_err.std():.3f}  bad={b_err.mean():.3f}±{b_err.std():.3f}")
-            # negate: lower error = better (more benign); score = -error so good has higher score
-            youden_thr = _find_best_f1_threshold(cal_labels, np.concatenate([-gc_err, -mb_err]))
-            m = _classification_metrics(main_labels, np.concatenate([-g_err, -b_err]),
+            # higher error = more anomalous = adversarial (positive class)
+            youden_thr = _find_best_f1_threshold(cal_labels, np.concatenate([gc_err, mb_err]))
+            m = _classification_metrics(main_labels, np.concatenate([g_err, b_err]),
                                          f"layer {layer} recon_error", best_f1_threshold=youden_thr)
             m["good_mean"] = float(g_err.mean())
             m["bad_mean"]  = float(b_err.mean())
@@ -678,8 +680,9 @@ def aggregate(out_dir: str) -> dict:
             b  = test_bad_scores[:, li].numpy()
             print(f"\n  Layer {layer}  "
                   f"{main_score_key} good={g.mean():.4f}±{g.std():.4f}  bad={b.mean():.4f}±{b.std():.4f}")
-            youden_thr = _find_best_f1_threshold(cal_labels, np.concatenate([gc, mb]))
-            m = _classification_metrics(main_labels, np.concatenate([g, b]),
+            # negate log_prob: lower log_prob = more anomalous = adversarial (positive class)
+            youden_thr = _find_best_f1_threshold(cal_labels, np.concatenate([-gc, -mb]))
+            m = _classification_metrics(main_labels, np.concatenate([-g, -b]),
                                          f"layer {layer} {main_score_key}", best_f1_threshold=youden_thr)
             m["good_mean"] = float(g.mean())
             m["bad_mean"]  = float(b.mean())
@@ -692,8 +695,9 @@ def aggregate(out_dir: str) -> dict:
                 b_es  = bad_es[:, li].numpy()
                 mb_es = metric_bad_es[:, li].numpy()
                 print(f"          exp_sigma   good={g_es.mean():.4f}±{g_es.std():.4f}  bad={b_es.mean():.4f}±{b_es.std():.4f}")
-                youden_thr_es = _find_best_f1_threshold(cal_labels, np.concatenate([-gc_es, -mb_es]))
-                m_es = _classification_metrics(main_labels, np.concatenate([-g_es, -b_es]),
+                # higher expected_sigma = more anomalous = adversarial (positive class)
+                youden_thr_es = _find_best_f1_threshold(cal_labels, np.concatenate([gc_es, mb_es]))
+                m_es = _classification_metrics(main_labels, np.concatenate([g_es, b_es]),
                                                f"layer {layer} exp_sigma", best_f1_threshold=youden_thr_es)
                 m_es["good_mean"] = float(g_es.mean())
                 m_es["bad_mean"]  = float(b_es.mean())
@@ -703,23 +707,23 @@ def aggregate(out_dir: str) -> dict:
     print("\n=================== Aggregate metrics ===================")
 
     if is_recon:
-        # mean across layers (lower error = better → negate so higher score = good)
+        # higher error = more anomalous = adversarial (positive class)
         print("\n--- mean recon_error across layers ---")
         results["aggregate"]["mean"] = {}
         results["aggregate"]["mean"]["recon_error"] = _agg_section(
             "mean recon_error",
-            -good_eval_recon_errors.mean(1).numpy(), -bad_recon_errors.mean(1).numpy(),
-            cal_g_scores=-good_recon_errors.mean(1).numpy(),
-            cal_b_scores=-metric_bad_recon_errors.mean(1).numpy())
+            good_eval_recon_errors.mean(1).numpy(), bad_recon_errors.mean(1).numpy(),
+            cal_g_scores=good_recon_errors.mean(1).numpy(),
+            cal_b_scores=metric_bad_recon_errors.mean(1).numpy())
 
-        # most anomalous layer wins (highest error → most negative negated score)
+        # most anomalous layer wins (highest error)
         print("\n--- max recon_error across layers (most anomalous layer) ---")
-        results["aggregate"]["min"] = {}
-        results["aggregate"]["min"]["recon_error"] = _agg_section(
+        results["aggregate"]["max"] = {}
+        results["aggregate"]["max"]["recon_error"] = _agg_section(
             "max recon_error",
-            -good_eval_recon_errors.max(1).values.numpy(), -bad_recon_errors.max(1).values.numpy(),
-            cal_g_scores=-good_recon_errors.max(1).values.numpy(),
-            cal_b_scores=-metric_bad_recon_errors.max(1).values.numpy())
+            good_eval_recon_errors.max(1).values.numpy(), bad_recon_errors.max(1).values.numpy(),
+            cal_g_scores=good_recon_errors.max(1).values.numpy(),
+            cal_b_scores=metric_bad_recon_errors.max(1).values.numpy())
 
         print("\n--- best single layer (by AUPRC) ---")
         results["aggregate"]["best_layer"] = {}
@@ -729,37 +733,40 @@ def aggregate(out_dir: str) -> dict:
             print(f"  best layer for {score_key}: layer {best_layer} (AUPRC={best_auprc:.4f})")
             m = _agg_section(
                 f"best-layer {score_key} (L{best_layer})",
-                -good_eval_recon_errors[:, best_li].numpy(), -bad_recon_errors[:, best_li].numpy(),
-                cal_g_scores=-good_recon_errors[:, best_li].numpy(),
-                cal_b_scores=-metric_bad_recon_errors[:, best_li].numpy())
+                good_eval_recon_errors[:, best_li].numpy(), bad_recon_errors[:, best_li].numpy(),
+                cal_g_scores=good_recon_errors[:, best_li].numpy(),
+                cal_b_scores=metric_bad_recon_errors[:, best_li].numpy())
             m["best_layer"] = best_layer
             results["aggregate"]["best_layer"][score_key] = m
 
     else:
+        # negate log_prob: lower log_prob = more anomalous = adversarial (positive class)
         print("\n--- mean across layers ---")
         results["aggregate"]["mean"] = {}
         results["aggregate"]["mean"][main_score_key] = _agg_section(
             f"mean {main_score_key}",
-            test_good_scores.mean(1).numpy(), test_bad_scores.mean(1).numpy(),
-            cal_g_scores=cal_good_scores.mean(1).numpy(), cal_b_scores=cal_bad_scores.mean(1).numpy())
+            -test_good_scores.mean(1).numpy(), -test_bad_scores.mean(1).numpy(),
+            cal_g_scores=-cal_good_scores.mean(1).numpy(), cal_b_scores=-cal_bad_scores.mean(1).numpy())
         if has_dte and good_eval_es is not None:
+            # higher expected_sigma = more anomalous = adversarial (positive class)
             results["aggregate"]["mean"]["expected_sigma"] = _agg_section(
                 "mean exp_sigma",
-                -good_eval_es.mean(1).numpy(), -bad_es.mean(1).numpy(),
-                cal_g_scores=-good_es.mean(1).numpy(), cal_b_scores=-metric_bad_es.mean(1).numpy())
+                good_eval_es.mean(1).numpy(), bad_es.mean(1).numpy(),
+                cal_g_scores=good_es.mean(1).numpy(), cal_b_scores=metric_bad_es.mean(1).numpy())
 
-        # most anomalous layer wins (lowest score)
-        print(f"\n--- min {main_score_key} across layers (most anomalous layer) ---")
-        results["aggregate"]["min"] = {}
-        results["aggregate"]["min"][main_score_key] = _agg_section(
-            f"min {main_score_key}",
-            test_good_scores.min(1).values.numpy(), test_bad_scores.min(1).values.numpy(),
-            cal_g_scores=cal_good_scores.min(1).values.numpy(), cal_b_scores=cal_bad_scores.min(1).values.numpy())
+        # most anomalous layer wins (highest negated log_prob = lowest original log_prob)
+        print(f"\n--- max neg {main_score_key} across layers (most anomalous layer) ---")
+        results["aggregate"]["max"] = {}
+        results["aggregate"]["max"][main_score_key] = _agg_section(
+            f"max neg {main_score_key}",
+            (-test_good_scores).max(1).values.numpy(), (-test_bad_scores).max(1).values.numpy(),
+            cal_g_scores=(-cal_good_scores).max(1).values.numpy(), cal_b_scores=(-cal_bad_scores).max(1).values.numpy())
         if has_dte and good_eval_es is not None:
-            results["aggregate"]["min"]["expected_sigma"] = _agg_section(
+            # highest expected_sigma across layers
+            results["aggregate"]["max"]["expected_sigma"] = _agg_section(
                 "max exp_sigma",
-                -good_eval_es.max(1).values.numpy(), -bad_es.max(1).values.numpy(),
-                cal_g_scores=-good_es.max(1).values.numpy(), cal_b_scores=-metric_bad_es.max(1).values.numpy())
+                good_eval_es.max(1).values.numpy(), bad_es.max(1).values.numpy(),
+                cal_g_scores=good_es.max(1).values.numpy(), cal_b_scores=metric_bad_es.max(1).values.numpy())
 
         print("\n--- best single layer (by AUPRC) ---")
         results["aggregate"]["best_layer"] = {}
@@ -768,15 +775,16 @@ def aggregate(out_dir: str) -> dict:
             best_li = layers.index(best_layer)
             print(f"  best layer for {score_key}: layer {best_layer} (AUPRC={best_auprc:.4f})")
             if score_key == main_score_key:
-                g_bl  = test_good_scores[:, best_li].numpy()
-                b_bl  = test_bad_scores[:, best_li].numpy()
-                gc_bl = cal_good_scores[:, best_li].numpy()
-                mb_bl = cal_bad_scores[:, best_li].numpy()
-            else:  # expected_sigma
-                g_bl  = -good_eval_es[:, best_li].numpy()
-                b_bl  = -bad_es[:, best_li].numpy()
-                gc_bl = -good_es[:, best_li].numpy()
-                mb_bl = -metric_bad_es[:, best_li].numpy()
+                # negate log_prob
+                g_bl  = -test_good_scores[:, best_li].numpy()
+                b_bl  = -test_bad_scores[:, best_li].numpy()
+                gc_bl = -cal_good_scores[:, best_li].numpy()
+                mb_bl = -cal_bad_scores[:, best_li].numpy()
+            else:  # expected_sigma — higher = more adversarial, no negation
+                g_bl  = good_eval_es[:, best_li].numpy()
+                b_bl  = bad_es[:, best_li].numpy()
+                gc_bl = good_es[:, best_li].numpy()
+                mb_bl = metric_bad_es[:, best_li].numpy()
             m = _agg_section(f"best-layer {score_key} (L{best_layer})", g_bl, b_bl,
                              cal_g_scores=gc_bl, cal_b_scores=mb_bl)
             m["best_layer"] = best_layer
@@ -814,7 +822,7 @@ if __name__ == "__main__":
             out_dir=cfg["out_dir"],
             model=cfg["model"],
             num_samples=cfg["num_samples"] if "num_samples" in cfg else None,
-            num_steps=cfg.get("num_steps", 100),
+            num_steps=cfg.get("num_timesteps", 100),
             num_hutchinson_samples=cfg.get("num_hutchinson_samples", 1),
             method=cfg.get("method", "hutchinson"),
             reference_num_samples=cfg.get("reference_num_samples", 512),
