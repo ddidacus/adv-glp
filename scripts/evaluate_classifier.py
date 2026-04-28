@@ -389,6 +389,10 @@ def main(
     test_good        = _gpu_chunk(test_good)
     test_bad         = _gpu_chunk(test_bad)
 
+    if not calibration_good or not calibration_bad or not test_good or not test_bad:
+        print(f"GPU {gpu_id}: empty chunk, nothing to do.")
+        return
+
     # DTE reference activations (kNN basis)
     reference_activations = None
     if method == "dte":
