@@ -1,12 +1,12 @@
 #!/bin/bash
 #SBATCH -J ift6164-classifier
 #SBATCH --nodes=1
-#SBATCH --gres=gpu:40gb:4
+#SBATCH --gres=gpu:80gb:4
 #SBATCH --cpus-per-task=2
 #SBATCH --ntasks=4
 #SBATCH --constraint=ampere|lovelace|hopper
 #SBATCH --mem=32G
-#SBATCH --partition=long
+#SBATCH --partition=short-unkillable
 #SBATCH --time=3:00:00
 
 export HF_HOME=$SCRATCH/.cache

@@ -4,6 +4,8 @@ import random
 import numpy as np
 import torch
 from pathlib import Path
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from datasets import load_dataset
 from tqdm import tqdm
@@ -157,7 +159,7 @@ def extract_activations(
     return activations.to(device=device, dtype=torch.bfloat16)
 
 def extract_log_probs(
-    texts: list[str],
+    texts: list[str] | None,
     llm_model,
     llm_tokenizer,
     diffusion_model,
@@ -171,12 +173,16 @@ def extract_log_probs(
     K: int = 5,
     num_sigma_bins: int = 100,
     normalize: bool = False,
+    precomputed_activations: torch.Tensor | None = None,
 ) -> dict:
     """ extract log probs depending on method (path integral / dte non-parametric posterior)"""
-    activations = extract_activations(
-        texts, llm_model, llm_tokenizer, diffusion_model,
-        device=device, batch_size=batch_size,
-    )
+    if precomputed_activations is not None:
+        activations = precomputed_activations.to(device=device, dtype=torch.bfloat16)
+    else:
+        activations = extract_activations(
+            texts, llm_model, llm_tokenizer, diffusion_model,
+            device=device, batch_size=batch_size,
+        )
 
     layer_log_probs = []
     layer_probs = []
@@ -221,7 +227,7 @@ def extract_log_probs(
 
 @torch.no_grad()
 def extract_reconstruction_errors(
-    texts: list[str],
+    texts: list[str] | None,
     llm_model,
     llm_tokenizer,
     diffusion_model,
@@ -230,16 +236,20 @@ def extract_reconstruction_errors(
     num_timesteps: int,
     device: str = "cuda:0",
     batch_size: int = 8,
+    precomputed_activations: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Reconstruct activations via GLP and return per-layer L2 errors (N, L). Higher = more anomalous."""
-    activations = save_acts(
-        hf_model=llm_model,
-        hf_tokenizer=llm_tokenizer,
-        text=texts,
-        tracedict_config=diffusion_model.tracedict_config,
-        token_idx="last",
-        batch_size=batch_size,
-    ).to(device=device, dtype=torch.bfloat16)  # (N, L, D)
+    if precomputed_activations is not None:
+        activations = precomputed_activations.to(device=device, dtype=torch.bfloat16)
+    else:
+        activations = save_acts(
+            hf_model=llm_model,
+            hf_tokenizer=llm_tokenizer,
+            text=texts,
+            tracedict_config=diffusion_model.tracedict_config,
+            token_idx="last",
+            batch_size=batch_size,
+        ).to(device=device, dtype=torch.bfloat16)  # (N, L, D)
 
     errors_per_layer = []
     for li, actual_layer in enumerate(layers):
@@ -297,7 +307,7 @@ def main(
     print("[+] Loading models...")
 
     if model == "1b":
-        _default_batch_size = 128
+        _default_batch_size = 64
         llm_model_id = "unsloth/Llama-3.2-1B"
         glp_model_id = "generative-latent-prior/glp-llama1b-d12-multi"
     elif model == "8b":
@@ -339,6 +349,24 @@ def main(
 
     Path(out_dir).mkdir(parents=True, exist_ok=True)
 
+    acts_cache_dir = Path(out_dir) / "activations_cache"
+    acts_cache_dir.mkdir(parents=True, exist_ok=True)
+
+    def _get_split_acts(split_name: str, texts: list[str]) -> torch.Tensor:
+        """Return (N, num_layers, D) CPU activations, loading from cache if available."""
+        cache_file = acts_cache_dir / f"{split_name}_{gpu_id}.th"
+        if cache_file.exists():
+            print(f"[+] Loading cached activations for '{split_name}' from {cache_file}")
+            return torch.load(cache_file, map_location="cpu", weights_only=True)
+        print(f"[+] Extracting activations for '{split_name}' ({len(texts)} samples)...")
+        acts = extract_activations(
+            texts, llm_model, llm_tokenizer, diffusion_model,
+            device=device, batch_size=batch_size,
+        ).cpu()
+        torch.save(acts, cache_file)
+        print(f"    Saved to {cache_file}")
+        return acts
+
     # load dataset
     train_dataset = load_dataset("ddidacus/guard-glp-data", split="train")
     calibration_dataset = load_dataset("ddidacus/guard-glp-data", split="calibration")
@@ -352,26 +380,23 @@ def main(
     test_good = [s["prompt"] for s in test_dataset if not s["adversarial"]]
     test_bad  = [s["prompt"] for s in test_dataset if s["adversarial"]]
 
-    # batchify
-    cal_good_prompts      = _chunk(calibration_good,      batch_size)
-    cal_bad_prompts = _chunk(calibration_bad,  batch_size)
-    test_good_prompts = _chunk(test_good, batch_size)
-    test_bad_prompts       = _chunk(test_bad,  batch_size)
+    def _gpu_chunk(lst: list) -> list:
+        chunk_size = (len(lst) + num_gpus - 1) // num_gpus
+        return lst[gpu_id * chunk_size : (gpu_id + 1) * chunk_size]
+
+    calibration_good = _gpu_chunk(calibration_good)
+    calibration_bad  = _gpu_chunk(calibration_bad)
+    test_good        = _gpu_chunk(test_good)
+    test_bad         = _gpu_chunk(test_bad)
 
     # DTE reference activations (kNN basis)
     reference_activations = None
     if method == "dte":
         ref_prompts = train_good[:reference_num_samples]
-        print(f"[+] Building DTE reference set from calibration benign "
-              f"({len(ref_prompts)} samples)")
-        ref_batches = _chunk(ref_prompts, batch_size)
-        ref_chunks = []
-        for batch in ref_batches:
-            ref_chunks.append(extract_activations(
-                batch, llm_model, llm_tokenizer, diffusion_model,
-                device=device, batch_size=batch_size,
-            ))
-        reference_activations = torch.cat(ref_chunks, dim=0)  # (N_ref, L, D) on device
+        print(f"[+] Building DTE reference set from train benign ({len(ref_prompts)} samples)")
+        reference_activations = _get_split_acts(
+            f"dte_ref_{reference_num_samples}", ref_prompts
+        ).to(device=device, dtype=torch.bfloat16)
         print(f"    reference_activations: {tuple(reference_activations.shape)}")
 
     # knn ref samples are generated by GLP (approx. fineweb, more logically aligned for classification here)
@@ -394,10 +419,17 @@ def main(
         reference_activations = torch.cat(per_layer_refs, dim=1).to(device)
         print(f"    reference_activations: {tuple(reference_activations.shape)}")
 
-    print(f"Calibration benign prompts: {sum(len(b) for b in cal_good_prompts)}")
-    print(f"Calibration malicious prompts:{sum(len(b) for b in cal_bad_prompts)}")
-    print(f"Test benign prompts:        {sum(len(b) for b in test_good_prompts)}")
-    print(f"Test malicious prompts:       {sum(len(b) for b in test_bad_prompts)}")
+    print(f"Calibration benign prompts:    {len(calibration_good)}")
+    print(f"Calibration malicious prompts: {len(calibration_bad)}")
+    print(f"Test benign prompts:           {len(test_good)}")
+    print(f"Test malicious prompts:        {len(test_bad)}")
+
+    # Pre-extract activations for all splits (with caching)
+    print("[+] Extracting/loading activations for all splits...")
+    cal_good_acts  = _get_split_acts("cal_good",  calibration_good)
+    cal_bad_acts   = _get_split_acts("cal_bad",   calibration_bad)
+    test_good_acts = _get_split_acts("test_good", test_good)
+    test_bad_acts  = _get_split_acts("test_bad",  test_bad)
 
     # organize kwargs
     is_recon = (method == "reconstruction_error")
@@ -417,39 +449,44 @@ def main(
         device=device, batch_size=batch_size,
     )
 
-    def _extract(texts):
+    def _score(acts: torch.Tensor):
+        """Compute scores from a batch of pre-extracted activations (batch, L, D)."""
         if is_recon:
             return extract_reconstruction_errors(
-                texts, llm_model, llm_tokenizer, diffusion_model, **_recon_kwargs
+                None, llm_model, llm_tokenizer, diffusion_model,
+                precomputed_activations=acts, **_recon_kwargs
             )
-        return extract_log_probs(texts, llm_model, llm_tokenizer, diffusion_model, **common_kwargs)
+        return extract_log_probs(
+            None, llm_model, llm_tokenizer, diffusion_model,
+            precomputed_activations=acts, **common_kwargs
+        )
 
     # calibration benign — paired with cal_bad to choose the Youden threshold
     print(f"======= Computing scores for calibration - benign set (GPU {gpu_id}) =======")
     cal_good_results = []
-    for batch in tqdm(cal_good_prompts, desc="cal_good_prompts", mininterval=30, ncols=120):
-        cal_good_results.append(_extract(batch))
+    for i in tqdm(range(0, len(cal_good_acts), batch_size), desc="cal_good", mininterval=30, ncols=120):
+        cal_good_results.append(_score(cal_good_acts[i:i+batch_size]))
     assert cal_good_results, "No good train batches processed"
 
     # calibration bad — Youden threshold selection
     print(f"======= Computing scores for calibration - malicious set (GPU {gpu_id}) =======")
     cal_bad_results = []
-    for batch in tqdm(cal_bad_prompts, desc="cal_bad_prompts", mininterval=30, ncols=120):
-        cal_bad_results.append(_extract(batch))
+    for i in tqdm(range(0, len(cal_bad_acts), batch_size), desc="cal_bad", mininterval=30, ncols=120):
+        cal_bad_results.append(_score(cal_bad_acts[i:i+batch_size]))
     assert cal_bad_results, "No bad calibration batches were processed"
 
     # test benign — held-out good samples used for final evaluation
     print(f"======= Computing scores for test - benign set (GPU {gpu_id}) =======")
     test_good_results = []
-    for batch in tqdm(test_good_prompts, desc="test_good_prompts", mininterval=30, ncols=120):
-        test_good_results.append(_extract(batch))
+    for i in tqdm(range(0, len(test_good_acts), batch_size), desc="test_good", mininterval=30, ncols=120):
+        test_good_results.append(_score(test_good_acts[i:i+batch_size]))
     assert test_good_results, "No good eval batches processed"
 
     # test bad — final evaluation
     print(f"======= Computing scores for test - malicious set (GPU {gpu_id}) =======")
     test_bad_results = []
-    for batch in tqdm(test_bad_prompts, desc="test_bad_prompts", mininterval=30, ncols=120):
-        test_bad_results.append(_extract(batch))
+    for i in tqdm(range(0, len(test_bad_acts), batch_size), desc="test_bad", mininterval=30, ncols=120):
+        test_bad_results.append(_score(test_bad_acts[i:i+batch_size]))
     assert test_bad_results, "No bad test batches were processed"
 
     # store everything
