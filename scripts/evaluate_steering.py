@@ -399,7 +399,7 @@ def generate_all_responses(
         intervention_wrapper=None, intervention_kwargs=None, layer_name=None,
     )
 
-    if steering_type == "no_steering":
+    if steering_type == "no_steering" and not use_glp:
         return results
 
     for layer_idx in steer_layers:
@@ -708,7 +708,7 @@ def run_shard(args):
     llm.generation_config.eos_token_id = [128001, 128009]
     llm.generation_config.pad_token_id = tokenizer.pad_token_id
 
-    if args.glp and args.steering_type != "no_steering":
+    if args.glp:
         print(f"Loading GLP: {GLP_MODEL_ID}")
         glp = load_glp(GLP_MODEL_ID, device=gen_device)
     else:
@@ -744,7 +744,17 @@ def run_shard(args):
 
     # ── Phase 3: Steering vector (uses full adv list so all GPUs get same sv) ──
     if args.steering_type == "no_steering":
-        steering_vecs = {}
+        # For no_steering + glp we still need a zero vector per layer so
+        # the GLP manifold-projection path fires (addition_intervention
+        # skips postprocess_fn when w is None).
+        if args.glp:
+            d = llm.config.hidden_size
+            steering_vecs = {
+                li: torch.zeros(d, device=gen_device, dtype=llm.dtype)
+                for li in STEER_LAYERS
+            }
+        else:
+            steering_vecs = {}
     else:
         steering_vecs = compute_steering_vector(
             llm, tokenizer,
@@ -969,10 +979,10 @@ if __name__ == "__main__":
     _run_shard = run_shard
     _aggregate = aggregate
 
-    def _args_from_cfg(cfg: dict, gpu_id: int = 0) -> types.SimpleNamespace:
+    def _args_from_cfg(cfg: dict, gpu_id: int = 0, num_gpus: int | None = None) -> types.SimpleNamespace:
         args = types.SimpleNamespace()
         args.gpu_id           = gpu_id
-        args.num_gpus         = cfg.get("num_gpus", 4)
+        args.num_gpus         = num_gpus if num_gpus is not None else cfg.get("num_gpus", 4)
         args.steering_type    = cfg.get("steering_type", "refusal")
         args.glp              = cfg.get("glp", False)
         args.n_samples        = cfg.get("n_samples", None)
@@ -988,18 +998,18 @@ if __name__ == "__main__":
         args.data_path        = cfg.get("data_path", None)
         return args
 
-    def run(config: str, gpu_id: int = 0):
+    def run(config: str, gpu_id: int = 0, num_gpus: int | None = None):
         with open(config) as f:
             cfg = yaml.safe_load(f)
         out_dir = Path(cfg["out_dir"])
         if gpu_id == 0:
             out_dir.mkdir(parents=True, exist_ok=True)
             shutil.copy2(config, out_dir / Path(config).name)
-        _run_shard(_args_from_cfg(cfg, gpu_id))
+        _run_shard(_args_from_cfg(cfg, gpu_id, num_gpus))
 
-    def aggregate(config: str):
+    def aggregate(config: str, num_gpus: int | None = None):
         with open(config) as f:
             cfg = yaml.safe_load(f)
-        _aggregate(_args_from_cfg(cfg))
+        _aggregate(_args_from_cfg(cfg, num_gpus=num_gpus))
 
     fire.Fire({"run": run, "aggregate": aggregate})
