@@ -50,7 +50,7 @@ random.seed(SEED)
 
 LOCAL_DATASET_PATH = "data/centreia_llama1b_prompts"
 
-LLM_MODEL_ID   = "meta-llama/Llama-3.2-1B-Instruct"
+LLM_MODEL_ID   = "unsloth/Llama-3.2-1B"
 GLP_MODEL_ID   = "generative-latent-prior/glp-llama1b-d12-multi"
 JUDGE_MODEL_ID = "meta-llama/Llama-Guard-3-8B"
 # STEER_LAYERS  = [7, 15]
