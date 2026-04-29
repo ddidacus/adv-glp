@@ -682,6 +682,12 @@ def run_shard(args):
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    rname = _run_name(args.steering_type, args.glp)
+    shard_file = _shard_path(out_dir, rname, args.gpu_id)
+    if shard_file.exists():
+        print(f"[GPU {args.gpu_id}] shard already exists at {shard_file}, skipping")
+        return
+
     gen_device = args.gen_device or f"cuda:{args.gpu_id}"
     gen_device = _resolve_device(gen_device)
 
@@ -780,7 +786,6 @@ def run_shard(args):
     )
 
     # ── Phase 6: Save shard ──────────────────────────────────────────────────
-    rname = _run_name(args.steering_type, args.glp)
     shard_payload = {
         "gpu_id": args.gpu_id,
         "num_gpus": args.num_gpus,
@@ -795,7 +800,6 @@ def run_shard(args):
         "benign_responses": benign_responses,
         "acts": acts,
     }
-    shard_file = _shard_path(Path(args.out_dir), rname, args.gpu_id)
     torch.save(shard_payload, shard_file)
     print(f"[GPU {args.gpu_id}] saved shard to {shard_file}")
 

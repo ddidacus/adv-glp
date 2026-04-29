@@ -111,7 +111,7 @@ def encode_prompts(prompts, batch_size, llm_model, llm_tokenizer, diffusion_mode
         batch_size=batch_size,
         device=device,
         layers=layers,
-        token_idx=token_pooling
+        token_pooling=token_pooling
     )
 
 def extract_main(
@@ -124,6 +124,11 @@ def extract_main(
     num_gpus: int = 4,
     token_pooling: str = "last"
 ):
+    out_file = os.path.join(out_dir, f"results_{gpu_id}.th")
+    if os.path.exists(out_file):
+        print(f"[GPU {gpu_id}] shard already exists at {out_file}, skipping")
+        return
+
     torch.manual_seed(42)
     random.seed(42)
 
@@ -182,7 +187,6 @@ def extract_main(
     activations_bad_set    = result_bad["activations"]
     reconstructed_bad_set  = result_bad["reconstructed_activations"]
 
-    out_file = out_dir + f"/results_{gpu_id}.th"
     torch.save({
         "activations_good_set": activations_good_set,
         "reconstructed_good_set": reconstructed_good_set,
@@ -352,18 +356,20 @@ def plot_error_by_layer(error_gap_stats: dict, out_dir: str, prefix: str = "erro
     bad_means   = [error_gap_stats[k]["bad_mean"]  for k in error_gap_stats]
     bad_stds    = [error_gap_stats[k]["bad_std"]   for k in error_gap_stats]
 
-    fig, ax = plt.subplots(figsize=(10, 5))
+    fig, ax = plt.subplots(figsize=(6, 6))
     ax.errorbar(layer_nums, good_means, yerr=good_stds, marker="o", capsize=4,
-                color="tab:blue",   label="Good")
+                color="tab:blue",   label="Benign")
     ax.errorbar(layer_nums, bad_means,  yerr=bad_stds,  marker="s", capsize=4,
-                color="tab:orange", label="Bad")
+                color="tab:orange", label="Malicious")
     ax.set_xlabel("Layer Index")
-    ax.set_ylabel("Mean Reconstruction Error (L2 norm)")
-    ax.set_title("Reconstruction Error by Layer — Good vs Bad")
+    ax.set_ylabel("mean L2 norm")
+    ax.set_title("GLP Reconstruction Error")
     ax.set_xticks(layer_nums)
     ax.legend()
     fig.tight_layout()
-    fig.savefig(os.path.join(out_dir, f"{prefix}.png"), dpi=200)
+    stem = os.path.join(out_dir, prefix)
+    fig.savefig(stem + ".png", dpi=200)
+    fig.savefig(stem + ".pdf", bbox_inches="tight")
     plt.close(fig)
 
 def aggregate_main(results_dir: str, layers: str = "1,7,15", method: str = "pca"):
@@ -437,7 +443,7 @@ def aggregate_main(results_dir: str, layers: str = "1,7,15", method: str = "pca"
     print(f"\nReconstruction error gap saved to {gap_json_path}")
 
     plot_error_by_layer(error_gap_stats, results_dir, prefix="error_by_layer")
-    print(f"Error-by-layer plot saved to {results_dir}/error_by_layer.png")
+    print(f"Error-by-layer plot saved to {results_dir}/error_by_layer.png and .pdf")
 
     plot_pca_distributions_layerwise(
         activations_good=activations_good,
