@@ -12,3 +12,4 @@ glp.egg-info/
 *.png
 results/
 DTE/
+.idea/

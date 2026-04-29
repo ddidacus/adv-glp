@@ -10,9 +10,9 @@ from datasets import load_dataset
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from eval_classifier import (
+from evaluate_classifier import (
     _threshold_metrics,
-    _find_youden_threshold,
+    _find_best_f1_threshold,
     _classification_metrics,
     _make_plots,
     extract_activations,
@@ -131,6 +131,17 @@ def main(
     calibration_bad  = [s["prompt"] for s in calibration_dataset if s["adversarial"]]
     test_good        = [s["prompt"] for s in test_dataset        if not s["adversarial"]]
     test_bad         = [s["prompt"] for s in test_dataset        if s["adversarial"]]
+
+    def _gpu_chunk(lst: list) -> list:
+        chunk_size = (len(lst) + num_gpus - 1) // num_gpus
+        return lst[gpu_id * chunk_size : (gpu_id + 1) * chunk_size]
+
+    train_good       = _gpu_chunk(train_good)
+    train_bad        = _gpu_chunk(train_bad)
+    calibration_good = _gpu_chunk(calibration_good)
+    calibration_bad  = _gpu_chunk(calibration_bad)
+    test_good        = _gpu_chunk(test_good)
+    test_bad         = _gpu_chunk(test_bad)
 
     def _extract(texts, tag):
         print(f"Extracting {tag} (N={len(texts)})...")
@@ -355,9 +366,11 @@ def aggregate(
     print(f"  probe_lr={probe_lr}  probe_epochs={probe_epochs}  "
           f"probe_wd={probe_wd}  probe_batch_size={probe_batch_size}  device={device}")
 
+    # training labels: 1=good 0=bad (for the probe's BCE loss)
     train_labels = torch.cat([torch.ones(n_train_good), torch.zeros(n_train_bad)])
-    cal_labels   = np.concatenate([np.ones(n_cal_good),  np.zeros(n_cal_bad)])
-    test_labels  = np.concatenate([np.ones(n_test_good), np.zeros(n_test_bad)])
+    # evaluation labels: positive class = adversarial (bad=1, good=0)
+    cal_labels   = np.concatenate([np.zeros(n_cal_good),  np.ones(n_cal_bad)])
+    test_labels  = np.concatenate([np.zeros(n_test_good), np.ones(n_test_bad)])
 
     results: dict = {
         "config": {**cfg, "probe_lr": probe_lr, "probe_epochs": probe_epochs,
@@ -384,10 +397,11 @@ def aggregate(
             weight_decay=probe_wd, batch_size=probe_batch_size,
             device=device,
         )
-        cal_good_scores[:, li]  = _score_probe(probe, cal_good_acts[:, li, :],  device, probe_batch_size)
-        cal_bad_scores[:, li]   = _score_probe(probe, cal_bad_acts[:, li, :],   device, probe_batch_size)
-        test_good_scores[:, li] = _score_probe(probe, test_good_acts[:, li, :], device, probe_batch_size)
-        test_bad_scores[:, li]  = _score_probe(probe, test_bad_acts[:, li, :],  device, probe_batch_size)
+        # probe outputs P(benign); flip to 1 - P(benign) so higher = more adversarial
+        cal_good_scores[:, li]  = 1.0 - _score_probe(probe, cal_good_acts[:, li, :],  device, probe_batch_size)
+        cal_bad_scores[:, li]   = 1.0 - _score_probe(probe, cal_bad_acts[:, li, :],   device, probe_batch_size)
+        test_good_scores[:, li] = 1.0 - _score_probe(probe, test_good_acts[:, li, :], device, probe_batch_size)
+        test_bad_scores[:, li]  = 1.0 - _score_probe(probe, test_bad_acts[:, li, :],  device, probe_batch_size)
 
         cg, cb = cal_good_scores[:, li],  cal_bad_scores[:, li]
         tg, tb = test_good_scores[:, li], test_bad_scores[:, li]
@@ -400,10 +414,10 @@ def aggregate(
         cg, cb = cal_good_scores[:, li],  cal_bad_scores[:, li]
         tg, tb = test_good_scores[:, li], test_bad_scores[:, li]
 
-        youden_thr = _find_youden_threshold(cal_labels, np.concatenate([cg, cb]))
+        youden_thr = _find_best_f1_threshold(cal_labels, np.concatenate([cg, cb]))
         m = _classification_metrics(
             test_labels, np.concatenate([tg, tb]),
-            f"layer {layer} probe", youden_threshold=youden_thr,
+            f"layer {layer} probe", best_f1_threshold=youden_thr,
         )
         m["good_mean"] = float(tg.mean())
         m["bad_mean"]  = float(tb.mean())
@@ -416,13 +430,14 @@ def aggregate(
     def _agg_section(label_str, g_sc, b_sc, cal_g_sc=None, cal_b_sc=None):
         if cal_g_sc is None:
             cal_g_sc, cal_b_sc = g_sc, b_sc
-        cal_lbl  = np.concatenate([np.ones(len(cal_g_sc)), np.zeros(len(cal_b_sc))])
-        eval_lbl = np.concatenate([np.ones(len(g_sc)),     np.zeros(len(b_sc))])
+        # positive class = adversarial (bad=1, good=0)
+        cal_lbl  = np.concatenate([np.zeros(len(cal_g_sc)), np.ones(len(cal_b_sc))])
+        eval_lbl = np.concatenate([np.zeros(len(g_sc)),     np.ones(len(b_sc))])
         eval_sc  = np.concatenate([g_sc, b_sc])
-        ythr     = _find_youden_threshold(cal_lbl, np.concatenate([cal_g_sc, cal_b_sc]))
+        ythr     = _find_best_f1_threshold(cal_lbl, np.concatenate([cal_g_sc, cal_b_sc]))
         print(f"\n  {label_str}  good={g_sc.mean():.4f}±{g_sc.std():.4f}  "
               f"bad={b_sc.mean():.4f}±{b_sc.std():.4f}")
-        m = _classification_metrics(eval_lbl, eval_sc, label_str, youden_threshold=ythr)
+        m = _classification_metrics(eval_lbl, eval_sc, label_str, best_f1_threshold=ythr)
         m["good_mean"] = float(g_sc.mean())
         m["bad_mean"]  = float(b_sc.mean())
         plot_series.append((label_str, eval_lbl, eval_sc))
@@ -437,11 +452,11 @@ def aggregate(
         cal_g_sc=cal_good_scores.mean(1), cal_b_sc=cal_bad_scores.mean(1),
     )
 
-    print("\n--- min across layers (most anomalous layer) ---")
-    results["aggregate"]["min"] = _agg_section(
-        "min probe-score",
-        test_good_scores.min(1), test_bad_scores.min(1),
-        cal_g_sc=cal_good_scores.min(1), cal_b_sc=cal_bad_scores.min(1),
+    print("\n--- max across layers (most anomalous layer) ---")
+    results["aggregate"]["max"] = _agg_section(
+        "max probe-score",
+        test_good_scores.max(1), test_bad_scores.max(1),
+        cal_g_sc=cal_good_scores.max(1), cal_b_sc=cal_bad_scores.max(1),
     )
 
     print("\n--- best single layer (by AUROC) ---")

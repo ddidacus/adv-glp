@@ -26,11 +26,11 @@ PROBE_DEVICE=$(python -c "import yaml; print(yaml.safe_load(open('$CONFIG')).get
 
 # Pass 1: extract activations in parallel across GPUs
 PID_LIST=""
-for gpu_id in 0 1 2 3; do
+for gpu_id in 0 1 2 3 4 5 6 7; do
     echo "Launching activation extraction on GPU $gpu_id"
     python eval_linear_probe.py run --config="$CONFIG" --gpu_id="$gpu_id" &
     PID_LIST+=" $!"
-    sleep 5
+    sleep 1
 done
 trap "kill $PID_LIST" SIGINT
 echo "Extracting activations..."
