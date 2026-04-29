@@ -51,6 +51,7 @@ random.seed(SEED)
 LOCAL_DATASET_PATH = "data/centreia_llama1b_prompts"
 
 LLM_MODEL_ID   = "unsloth/Llama-3.2-1B"
+LLM_TOKENIZER_ID = "unsloth/Llama-3.2-1B-Instruct"  # instruct variant has the chat template
 GLP_MODEL_ID   = "generative-latent-prior/glp-llama1b-d12-multi"
 JUDGE_MODEL_ID = "meta-llama/Llama-Guard-3-8B"
 # STEER_LAYERS  = [7, 15]
@@ -688,7 +689,8 @@ def run_shard(args):
 
     # ── Phase 1: Load LLM (+ GLP) ─────────────────────────────────────────────
     print(f"Loading LLM: {LLM_MODEL_ID}")
-    tokenizer = AutoTokenizer.from_pretrained(LLM_MODEL_ID)
+    # Load tokenizer from the instruct variant to get the chat template
+    tokenizer = AutoTokenizer.from_pretrained(LLM_TOKENIZER_ID)
     tokenizer.padding_side = "left"
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
