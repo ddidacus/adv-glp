@@ -20,8 +20,17 @@ Usage:
   python scripts/evaluate_steering.py aggregate --config=configs/paper/steering/glp.yaml
 """
 
-import json
 import os
+import sys
+
+# Must be set before any HuggingFace imports so the right cache is used.
+# On the Mila cluster $HOME has a small quota; models live in $SCRATCH/.cache.
+_scratch = os.environ.get("SCRATCH", "")
+if _scratch:
+    os.environ.setdefault("HF_HOME", f"{_scratch}/.cache")
+    os.environ.setdefault("UV_CACHE_DIR", f"{_scratch}/.cache")
+
+import json
 from pathlib import Path
 
 import torch
