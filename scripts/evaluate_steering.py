@@ -98,7 +98,10 @@ def generate_responses_batch(
         attention_mask=attention_mask,
         max_new_tokens=max_new_tokens,
         pad_token_id=pad_id,
-        do_sample=False,
+        do_sample=True,
+        top_p=0.9,
+        top_k=50,
+        temperature=1.0,
     )
     return [
         llm_tokenizer.decode(out[max_len:], skip_special_tokens=True).strip()
@@ -356,7 +359,10 @@ def _classic_generate_batch(
         out_ids = llm.generate(
             **enc,
             max_new_tokens=max_new_tokens,
-            do_sample=False,
+            do_sample=True,
+            top_p=0.9,
+            top_k=50,
+            temperature=1.0,
         )
         input_len = enc["input_ids"].shape[1]
         out_ids = out_ids[:, input_len:]
@@ -437,7 +443,7 @@ def generate_all_responses(
                             "alphas": alpha_t,
                             "postprocess_fn": postprocess_fn,
                         },
-                        generate_kwargs={"max_new_tokens": max_new_tokens, "do_sample": False},
+                        generate_kwargs={"max_new_tokens": max_new_tokens, "do_sample": True, "top_p": 0.9, "top_k": 50, "temperature": 1.0},
                     )
                     responses.extend(gen_out)
             else:
