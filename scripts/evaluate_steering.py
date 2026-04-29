@@ -23,6 +23,8 @@ Usage:
 import os
 import sys
 
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
 # Must be set before any HuggingFace imports so the right cache is used.
 # On the Mila cluster $HOME has a small quota; models live in $SCRATCH/.cache.
 _scratch = os.environ.get("SCRATCH", "")
