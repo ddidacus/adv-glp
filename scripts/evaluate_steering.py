@@ -28,13 +28,9 @@ import torch
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+from datasets import load_dataset
 from glp.denoiser import load_glp
 from glp import script_steer
-from merge_datasets import (
-    generate_responses_batch,
-    judge_attacks_batch,
-    load_judge,
-)
 import random
 
 SEED = 42
@@ -43,10 +39,94 @@ random.seed(SEED)
 
 LOCAL_DATASET_PATH = "data/centreia_llama1b_prompts"
 
-LLM_MODEL_ID = "meta-llama/Llama-3.2-1B-Instruct"
-GLP_MODEL_ID  = "generative-latent-prior/glp-llama1b-d12-multi"
+LLM_MODEL_ID   = "meta-llama/Llama-3.2-1B-Instruct"
+GLP_MODEL_ID   = "generative-latent-prior/glp-llama1b-d12-multi"
+JUDGE_MODEL_ID = "meta-llama/Llama-Guard-3-8B"
 # STEER_LAYERS  = [7, 15]
 STEER_LAYERS  = [15]
+
+
+# ─────────────────────────────────────────────────────────────
+#  Judge / generation helpers (inlined from merge_datasets)
+# ─────────────────────────────────────────────────────────────
+
+def load_judge(device: str):
+    print(f"Loading judge: {JUDGE_MODEL_ID}")
+    tokenizer = AutoTokenizer.from_pretrained(JUDGE_MODEL_ID)
+    model = AutoModelForCausalLM.from_pretrained(
+        JUDGE_MODEL_ID, torch_dtype=torch.bfloat16
+    ).to(device)
+    model.eval()
+    return model, tokenizer
+
+
+@torch.no_grad()
+def generate_responses_batch(
+    llm, llm_tokenizer, prompts: list[str], device: str,
+    max_new_tokens: int = 200, max_input_tokens: int = 512,
+) -> list[str]:
+    pad_id = llm_tokenizer.pad_token_id
+    encoded = [
+        llm_tokenizer.apply_chat_template(
+            [{"role": "user", "content": p}],
+            tokenize=True, add_generation_prompt=True,
+        )
+        for p in prompts
+    ]
+    encoded = [e[-max_input_tokens:] if len(e) > max_input_tokens else e for e in encoded]
+    max_len = max(len(e) for e in encoded)
+    input_ids = torch.tensor(
+        [[pad_id] * (max_len - len(e)) + e for e in encoded], device=device
+    )
+    attention_mask = torch.tensor(
+        [[0] * (max_len - len(e)) + [1] * len(e) for e in encoded], device=device
+    )
+    outputs = llm.generate(
+        input_ids=input_ids,
+        attention_mask=attention_mask,
+        max_new_tokens=max_new_tokens,
+        pad_token_id=pad_id,
+        do_sample=False,
+    )
+    return [
+        llm_tokenizer.decode(out[max_len:], skip_special_tokens=True).strip()
+        for out in outputs
+    ]
+
+
+@torch.no_grad()
+def judge_attacks_batch(
+    judge_model, judge_tokenizer, prompts: list[str], responses: list[str],
+    device: str, max_input_tokens: int = 1024,
+) -> list[bool]:
+    pad_id = judge_tokenizer.pad_token_id or 0
+    encoded = [
+        judge_tokenizer.apply_chat_template(
+            [{"role": "user", "content": p}, {"role": "assistant", "content": r}],
+            tokenize=True,
+        )
+        for p, r in zip(prompts, responses)
+    ]
+    encoded = [e[-max_input_tokens:] if len(e) > max_input_tokens else e for e in encoded]
+    max_len = max(len(e) for e in encoded)
+    input_ids = torch.tensor(
+        [[pad_id] * (max_len - len(e)) + e for e in encoded], device=device
+    )
+    attention_mask = torch.tensor(
+        [[0] * (max_len - len(e)) + [1] * len(e) for e in encoded], device=device
+    )
+    outputs = judge_model.generate(
+        input_ids=input_ids,
+        attention_mask=attention_mask,
+        max_new_tokens=20,
+        pad_token_id=pad_id,
+    )
+    results = []
+    for out in outputs:
+        text = judge_tokenizer.decode(out[max_len:], skip_special_tokens=True).strip()
+        verdict = text.splitlines()[0].strip().lower()
+        results.append(verdict == "unsafe")
+    return results
 
 
 # ─────────────────────────────────────────────────────────────
