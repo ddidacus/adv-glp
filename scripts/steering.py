@@ -105,7 +105,19 @@ def run(
     num_samples: int = None,
     out_dir: str = "results/steering",
     judge_device: str = None,
+    do_sample: bool = False,
 ):
+
+    GENERATION_KWARGS = {
+        "max_new_tokens": max_new_tokens,
+        "temperature": 1.0,
+        "top_p": 0.9,
+        "do_sample": do_sample
+    }
+
+    if do_sample: print("[+] Using sampling from LLM...")
+    else: print("[+] Using greedy decoding from LLM...")
+
     assert steering_type in STEERING_TYPES, \
         f"--steering_type must be one of {STEERING_TYPES}, got '{steering_type}'"
     assert model in MODEL_IDS, f"--model must be one of {list(MODEL_IDS)}, got '{model}'"
@@ -262,7 +274,7 @@ def run(
 
         elif steering_type == "glp":
             layer_name = f"model.layers.{STEER_LAYER}"
-            glp_generate_fn = script_steer.generate_with_intervention_wrapper(seed=42)
+            glp_generate_fn = script_steer.generate_with_intervention_wrapper(seed=42, generate_kwargs=GENERATION_KWARGS)
             glp_intervention_kwargs = {
                 "w": sv_single,
                 "alphas": torch.tensor([alpha]),
@@ -276,7 +288,7 @@ def run(
                     layers=[layer_name],
                     intervention_wrapper=script_steer.addition_intervention,
                     intervention_kwargs=glp_intervention_kwargs,
-                    generate_kwargs={"max_new_tokens": max_new_tokens, "do_sample": False},
+                    generate_kwargs=GENERATION_KWARGS,
                 )
             inputs = tokenizer(
                 batch, return_tensors="pt", padding="longest", truncation=True,
@@ -285,9 +297,8 @@ def run(
             with torch.no_grad():
                 output_ids = llm.generate(
                     **inputs,
-                    max_new_tokens=max_new_tokens,
-                    do_sample=False,
                     pad_token_id=tokenizer.pad_token_id,
+                    **GENERATION_KWARGS
                 )
             return [
                 tokenizer.decode(out[input_len:], skip_special_tokens=True).strip()
@@ -325,9 +336,8 @@ def run(
             with torch.no_grad():
                 cls_output_ids = llm.generate(
                     **cls_inputs,
-                    max_new_tokens=5,
-                    do_sample=False,
                     pad_token_id=tokenizer.pad_token_id,
+                    max_new_tokens=max_new_tokens,
                 )
             for prompt, response, out in zip(batch, responses, cls_output_ids):
                 lbl = tokenizer.decode(out[cls_input_len:], skip_special_tokens=True).strip().lower()

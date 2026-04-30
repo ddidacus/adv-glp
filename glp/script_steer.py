@@ -79,7 +79,7 @@ def generate(model, processor, inputs, remove_input=True, **generate_kwargs):
         output = processor.batch_decode(output, skip_special_tokens=True)
     return output
     
-def generate_with_intervention_wrapper(seed=42):
+def generate_with_intervention_wrapper(seed=42, generate_kwargs={"max_new_tokens": 10}):
     def generate_with_intervention(text, hf_model, hf_processor, generate_kwargs={"max_new_tokens": 10}, layers=[], intervention_wrapper=None, intervention_kwargs={}, forward_only=False):
         if seed is not None:
             transformers.set_seed(seed)

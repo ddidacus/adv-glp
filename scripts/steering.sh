@@ -29,6 +29,7 @@ for gpu_id in $(seq 0 $((NUM_GPUS - 1))); do
         --model="$MODEL" \
         --steering_type="$STEERING_TYPE" \
         --alphas="$ALPHAS_JSON" \
+        --do_sample \
         --out_dir="$OUT_DIR" &
     PID_LIST+=" $!"
     sleep 0.5
