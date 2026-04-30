@@ -728,16 +728,17 @@ def run_shard(args):
     # buffer is normally unused, but baukit/TraceDict hooks can force a
     # fallback to eager attention which reads it.
     _max_seq = 2048
-    if hasattr(llm.model, "causal_mask"):
+    if "causal_mask" in dict(llm.model.named_buffers()):
         old = llm.model.causal_mask
         new_mask = torch.full((_max_seq, _max_seq), fill_value=old.min().item(),
                               dtype=old.dtype, device=old.device)
         new_mask = torch.triu(new_mask, diagonal=1)
-        # match original shape: could be (S,S) or (1,1,S,S)
         for _ in range(old.ndim - 2):
             new_mask = new_mask.unsqueeze(0)
-        llm.model.causal_mask = new_mask
-        print(f"Resized causal_mask: {old.shape} -> {new_mask.shape}")
+        llm.model.register_buffer("causal_mask", new_mask, persistent=False)
+        del old
+        torch.cuda.empty_cache()
+        print(f"Resized causal_mask buffer -> {new_mask.shape}")
     llm.config.max_position_embeddings = _max_seq
     llm.generation_config.eos_token_id = [128001, 128009]
     llm.generation_config.pad_token_id = tokenizer.pad_token_id
