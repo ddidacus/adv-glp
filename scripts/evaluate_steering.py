@@ -727,17 +727,27 @@ def run_shard(args):
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    from transformers import AutoConfig
-    llm_config = AutoConfig.from_pretrained(LLM_MODEL_ID)
-    # Cap the static causal-mask size. The default 131072 causes a 68+ GiB
-    # mask allocation that OOMs on most GPUs.  We never exceed ~1024 tokens
-    # (512 input + 512 generated), so 2048 is generous.
-    llm_config.max_position_embeddings = 2048
     llm = AutoModelForCausalLM.from_pretrained(
         LLM_MODEL_ID, torch_dtype=torch.bfloat16,
-        config=llm_config,
+        attn_implementation="sdpa",
     ).to(gen_device)
     llm.eval()
+    # Shrink the static causal-mask buffer that some transformers versions
+    # pre-allocate at full max_position_embeddings (131072).  With sdpa this
+    # buffer is normally unused, but baukit/TraceDict hooks can force a
+    # fallback to eager attention which reads it.
+    _max_seq = 2048
+    if hasattr(llm.model, "causal_mask"):
+        old = llm.model.causal_mask
+        new_mask = torch.full((_max_seq, _max_seq), fill_value=old.min().item(),
+                              dtype=old.dtype, device=old.device)
+        new_mask = torch.triu(new_mask, diagonal=1)
+        # match original shape: could be (S,S) or (1,1,S,S)
+        for _ in range(old.ndim - 2):
+            new_mask = new_mask.unsqueeze(0)
+        llm.model.causal_mask = new_mask
+        print(f"Resized causal_mask: {old.shape} -> {new_mask.shape}")
+    llm.config.max_position_embeddings = _max_seq
     llm.generation_config.eos_token_id = [128001, 128009]
     llm.generation_config.pad_token_id = tokenizer.pad_token_id
 
