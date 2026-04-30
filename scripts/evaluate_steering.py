@@ -76,31 +76,22 @@ def generate_responses_batch(
     llm, llm_tokenizer, prompts: list[str], device: str,
     max_new_tokens: int = 200, max_input_tokens: int = 512,
 ) -> list[str]:
-    pad_id = llm_tokenizer.pad_token_id
-    encoded = [
-        llm_tokenizer.encode(p + "\n", add_special_tokens=False)
-        for p in prompts
-    ]
-    encoded = [e[-max_input_tokens:] if len(e) > max_input_tokens else e for e in encoded]
-    max_len = max(len(e) for e in encoded)
-    input_ids = torch.tensor(
-        [[pad_id] * (max_len - len(e)) + e for e in encoded], device=device
-    )
-    attention_mask = torch.tensor(
-        [[0] * (max_len - len(e)) + [1] * len(e) for e in encoded], device=device
-    )
+    texts = [p + "\n" for p in prompts]
+    enc = llm_tokenizer(
+        texts, return_tensors="pt", padding=True,
+        truncation=True, max_length=max_input_tokens,
+    ).to(device)
+    input_len = enc["input_ids"].shape[1]
     outputs = llm.generate(
-        input_ids=input_ids,
-        attention_mask=attention_mask,
+        **enc,
         max_new_tokens=max_new_tokens,
-        pad_token_id=pad_id,
+        pad_token_id=llm_tokenizer.pad_token_id,
         do_sample=True,
         top_p=0.9,
-        top_k=50,
         temperature=1.0,
     )
     return [
-        llm_tokenizer.decode(out[max_len:], skip_special_tokens=True).strip()
+        llm_tokenizer.decode(out[input_len:], skip_special_tokens=True).strip()
         for out in outputs
     ]
 
@@ -189,20 +180,20 @@ def compute_steering_vector(
     steering_type='compliance': suffixes drawn from ACCEPTANCE_SUFFIXES
     """
     rng = random.Random(seed)
-    if steering_type == "refusal":
-        responses = [rng.choice(REFUSAL_SUFFIXES) for _ in adv_prompts]
-    elif steering_type == "compliance":
-        responses = [rng.choice(ACCEPTANCE_SUFFIXES) for _ in adv_prompts]
-    else:
-        raise ValueError(f"Unknown steering_type: {steering_type!r}")
+
+    refusal_responses = [rng.choice(REFUSAL_SUFFIXES) for _ in adv_prompts]
+    compliance_responses = [rng.choice(ACCEPTANCE_SUFFIXES) for _ in adv_prompts]
 
     print(f"=== Computing {steering_type} steering vector ({len(adv_prompts)} prompts) ===")
-    acts = collect_answer_mean_acts(
-        adv_prompts, responses, llm, tokenizer, layer_indices, device, batch_size,
+    compliance_acts = collect_answer_mean_acts(
+        adv_prompts, compliance_responses, llm, tokenizer, layer_indices, device, batch_size,
+    )
+    refusal_acts = collect_answer_mean_acts(
+        adv_prompts, refusal_responses, llm, tokenizer, layer_indices, device, batch_size,
     )
     steering = {}
     for li in layer_indices:
-        sv = acts[li].mean(0)
+        sv = refusal_acts[li].mean(0) - compliance_acts[li].mean(0)
         print(f"  Layer {li}: sv norm = {sv.norm().item():.4f}")
         steering[li] = sv.to(device=device, dtype=llm.dtype)
     return steering
