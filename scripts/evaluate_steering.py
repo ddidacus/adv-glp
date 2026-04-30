@@ -399,11 +399,11 @@ def generate_all_responses(
     """
     results = {}
 
-    print("=== Generating baseline responses ===")
-    results["baseline"] = _batched_generate(
-        prompts, llm, tokenizer, device, batch_size, max_new_tokens,
-        intervention_wrapper=None, intervention_kwargs=None, layer_name=None,
-    )
+    # print("=== Generating baseline responses ===")
+    # results["baseline"] = _batched_generate(
+    #     prompts, llm, tokenizer, device, batch_size, max_new_tokens,
+    #     intervention_wrapper=None, intervention_kwargs=None, layer_name=None,
+    # )
 
     if steering_type == "no_steering" and not use_glp:
         return results
@@ -731,7 +731,7 @@ def run_shard(args):
     #     benign_prompts = [row["prompt"] for row in local_ds if row["label"] == "benign"]
     #     adv_prompts    = [row["prompt"] for row in local_ds if row["label"] == "adversarial_successful"]
     
-    dataset = load_dataset("ddidacus/guard-glp-data", split="test")
+    dataset = load_dataset("ddidacus/guard-glp-data", split="steering_test")
     benign_prompts = list(dataset.filter(lambda x: x["adversarial"] == False)["prompt"])
     adv_prompts = list(dataset.filter(lambda x: x["adversarial"] == True)["prompt"])
 
