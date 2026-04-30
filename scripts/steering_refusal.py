@@ -1,6 +1,7 @@
 import json
 import os
 import sys
+import numpy as np
 import torch
 import fire
 from pathlib import Path
@@ -78,6 +79,19 @@ def _gpu_shard(lst: list, gpu_id: int, num_gpus: int) -> list:
     return lst[gpu_id * chunk_size : (gpu_id + 1) * chunk_size]
 
 
+def _filter_outliers(prompts: list[str], name: str, iqr_factor: float = 3.0) -> list[str]:
+    """Print length stats and remove outliers beyond iqr_factor * IQR above Q3."""
+    lengths = np.array([len(p) for p in prompts])
+    q1, q3 = np.percentile(lengths, [25, 75])
+    iqr = q3 - q1
+    cutoff = q3 + iqr_factor * iqr
+    filtered = [p for p in prompts if len(p) <= cutoff]
+    print(f"  {name}: n={len(prompts)}, mean={lengths.mean():.0f}, "
+          f"median={np.median(lengths):.0f}, q1={q1:.0f}, q3={q3:.0f}, "
+          f"max={lengths.max()}, cutoff={cutoff:.0f}, removed={len(prompts)-len(filtered)}")
+    return filtered
+
+
 STEERING_TYPES = ("none", "sv", "glp")
 
 
@@ -124,13 +138,19 @@ def run(
     train_ds = load_dataset("ddidacus/guard-glp-data", split="train")
     train_malicious_prompts = [sample["prompt"] for sample in train_ds if sample["adversarial"]]
 
-    # steering vector: refusal - compliant (both using malicious prompts)
-    train_refusal_texts = [p + " " + REFUSAL_RESPONSE for p in train_malicious_prompts]
-    train_compliant_texts = [p + " " + COMPLIANT_RESPONSE for p in train_malicious_prompts]
-
     ds = load_dataset("ddidacus/guard-glp-data", split="steering_test")
     malicious_prompts = [sample["prompt"] for sample in ds if sample["adversarial"]]
     benign_prompts = [sample["prompt"] for sample in ds if not sample["adversarial"]]
+
+    # prompt length stats and outlier removal
+    print(f"[GPU {gpu_id}] Prompt length stats (chars):")
+    train_malicious_prompts = _filter_outliers(train_malicious_prompts, "train_malicious")
+    malicious_prompts = _filter_outliers(malicious_prompts, "test_malicious")
+    benign_prompts = _filter_outliers(benign_prompts, "test_benign")
+
+    # steering vector: refusal - compliant (both using malicious prompts)
+    train_refusal_texts = [p + " " + REFUSAL_RESPONSE for p in train_malicious_prompts]
+    train_compliant_texts = [p + " " + COMPLIANT_RESPONSE for p in train_malicious_prompts]
 
     # truncate benign prompts to 512 tokens
     max_prompt_tokens = 512
