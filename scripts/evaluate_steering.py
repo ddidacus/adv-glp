@@ -281,6 +281,7 @@ def collect_answer_mean_acts(
     layer_indices: list[int],
     device: str,
     batch_size: int = 8,
+    max_length: int = 1024,
 ) -> dict[int, torch.Tensor]:
     """
     Single forward-pass over (prompt + response). Mean-pools activations over
@@ -314,13 +315,13 @@ def collect_answer_mean_acts(
         # prompt token counts (no padding) to locate the response span
         prompt_enc = tokenizer(
             formatted_prompts,
-            padding=False, truncation=True, max_length=2048,
+            padding=False, truncation=True, max_length=max_length,
         )
         prompt_lens = torch.tensor([len(ids) for ids in prompt_enc["input_ids"]])  # (B,)
 
         enc = tokenizer(
             full_texts, return_tensors="pt", padding=True,
-            truncation=True, max_length=2048,
+            truncation=True, max_length=max_length,
         ).to(device)
 
         total_len = enc["input_ids"].shape[1]
@@ -380,6 +381,7 @@ def _classic_generate_batch(
     alpha: float,
     device: str,
     max_new_tokens: int,
+    max_input_tokens: int = 512,
 ) -> list[str]:
     """
     Standard activation-addition steering: register a forward hook on
@@ -398,7 +400,7 @@ def _classic_generate_batch(
     try:
         enc = tokenizer(
             formatted, return_tensors="pt", padding=True,
-            truncation=True, max_length=2048,
+            truncation=True, max_length=max_input_tokens,
         ).to(device)
         out_ids = llm.generate(
             **enc,
