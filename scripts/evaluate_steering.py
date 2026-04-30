@@ -721,25 +721,25 @@ def run_shard(args):
     llm = AutoModelForCausalLM.from_pretrained(
         LLM_MODEL_ID, torch_dtype=torch.bfloat16,
         attn_implementation="sdpa",
-    ).to(gen_device)
-    llm.eval()
-    # Shrink the static causal-mask buffer that some transformers versions
-    # pre-allocate at full max_position_embeddings (131072).  With sdpa this
-    # buffer is normally unused, but baukit/TraceDict hooks can force a
-    # fallback to eager attention which reads it.
+    )
+    # The default max_position_embeddings=131072 causes a ~68 GiB static
+    # causal-mask buffer.  Replace it with a 2048-sized version before
+    # moving to GPU so the huge buffer never touches device memory.
     _max_seq = 2048
-    if "causal_mask" in dict(llm.model.named_buffers()):
-        old = llm.model.causal_mask
+    inner = llm.model  # LlamaModel
+    if hasattr(inner, "_buffers") and "causal_mask" in inner._buffers:
+        old = inner._buffers["causal_mask"]
         new_mask = torch.full((_max_seq, _max_seq), fill_value=old.min().item(),
-                              dtype=old.dtype, device=old.device)
+                              dtype=old.dtype)
         new_mask = torch.triu(new_mask, diagonal=1)
         for _ in range(old.ndim - 2):
             new_mask = new_mask.unsqueeze(0)
-        llm.model.register_buffer("causal_mask", new_mask, persistent=False)
+        inner._buffers["causal_mask"] = new_mask
+        print(f"Replaced causal_mask: {old.shape} -> {new_mask.shape}")
         del old
-        torch.cuda.empty_cache()
-        print(f"Resized causal_mask buffer -> {new_mask.shape}")
     llm.config.max_position_embeddings = _max_seq
+    llm.to(gen_device)
+    llm.eval()
     llm.generation_config.eos_token_id = [128001, 128009]
     llm.generation_config.pad_token_id = tokenizer.pad_token_id
 

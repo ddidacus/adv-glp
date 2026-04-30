@@ -118,9 +118,15 @@ def run(
     print(f"[GPU {gpu_id}] Loading dataset")
     batch_size = 32
 
+    REFUSAL_RESPONSE = "Sorry, I can't help with that."
+    COMPLIANT_RESPONSE = "Sure, here is the answer:"
+
     train_ds = load_dataset("ddidacus/guard-glp-data", split="train")
     train_malicious_prompts = [sample["prompt"] for sample in train_ds if sample["adversarial"]]
-    train_benign_prompts = [sample["prompt"] for sample in train_ds if not sample["adversarial"]]
+
+    # steering vector: refusal - compliant (both using malicious prompts)
+    train_refusal_texts = [p + " " + REFUSAL_RESPONSE for p in train_malicious_prompts]
+    train_compliant_texts = [p + " " + COMPLIANT_RESPONSE for p in train_malicious_prompts]
 
     ds = load_dataset("ddidacus/guard-glp-data", split="steering_test")
     malicious_prompts = [sample["prompt"] for sample in ds if sample["adversarial"]]
@@ -132,7 +138,6 @@ def run(
         tokenizer.decode(tokenizer.encode(t, max_length=max_prompt_tokens, truncation=True), skip_special_tokens=True)
         for t in texts
     ]
-    train_benign_prompts = truncate(train_benign_prompts)
     benign_prompts = truncate(benign_prompts)
 
     if num_samples is not None:
@@ -162,19 +167,19 @@ def run(
             "layers": list(range(num_layers)),
             "retain": "output",
         }
-        print(f"[GPU {gpu_id}] Computing steering vectors from train split activations...")
-        benign_acts = save_acts(
-            llm, tokenizer, train_benign_prompts,
+        print(f"[GPU {gpu_id}] Computing refusal/compliant steering vectors...")
+        refusal_acts = save_acts(
+            llm, tokenizer, train_refusal_texts,
             tracedict_config=tracedict_config,
             token_idx="last", batch_size=batch_size, use_tqdm=True,
         )
-        malicious_acts = save_acts(
-            llm, tokenizer, train_malicious_prompts,
+        compliant_acts = save_acts(
+            llm, tokenizer, train_compliant_texts,
             tracedict_config=tracedict_config,
             token_idx="last", batch_size=batch_size, use_tqdm=True,
         )
-        sv_vecs = benign_acts.mean(dim=0) - malicious_acts.mean(dim=0)  # (L, D)
-        del benign_acts, malicious_acts
+        sv_vecs = refusal_acts.mean(dim=0) - compliant_acts.mean(dim=0)  # (L, D)
+        del refusal_acts, compliant_acts
         tokenizer.padding_side = "left"
 
     elif steering_type == "glp":
@@ -183,19 +188,19 @@ def run(
             "layers": [STEER_LAYER],
             "retain": "output",
         }
-        print(f"[GPU {gpu_id}] Computing steering vector at layer {STEER_LAYER}...")
-        benign_acts = save_acts(
-            llm, tokenizer, train_benign_prompts,
+        print(f"[GPU {gpu_id}] Computing refusal/compliant steering vector at layer {STEER_LAYER}...")
+        refusal_acts = save_acts(
+            llm, tokenizer, train_refusal_texts,
             tracedict_config=tracedict_config,
             token_idx="last", batch_size=batch_size, use_tqdm=True,
         )
-        malicious_acts = save_acts(
-            llm, tokenizer, train_malicious_prompts,
+        compliant_acts = save_acts(
+            llm, tokenizer, train_compliant_texts,
             tracedict_config=tracedict_config,
             token_idx="last", batch_size=batch_size, use_tqdm=True,
         )
-        sv_single = (benign_acts.mean(dim=0) - malicious_acts.mean(dim=0)).squeeze(0)  # (D,)
-        del benign_acts, malicious_acts
+        sv_single = (refusal_acts.mean(dim=0) - compliant_acts.mean(dim=0)).squeeze(0)  # (D,)
+        del refusal_acts, compliant_acts
         tokenizer.padding_side = "left"
 
         print(f"[GPU {gpu_id}] Loading GLP model: {GLP_MODEL_ID}")
