@@ -4,4 +4,4 @@ export UV_CACHE_DIR=$SCRATCH/.cache
 
 source .venv/bin/activate
 
-python scripts/rejudge_responses.py "$@"
+python scripts/rejudge_responses.py "$@" --tp 8
