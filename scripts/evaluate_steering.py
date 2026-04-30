@@ -51,7 +51,6 @@ random.seed(SEED)
 LOCAL_DATASET_PATH = "data/centreia_llama1b_prompts"
 
 LLM_MODEL_ID   = "unsloth/Llama-3.2-1B"
-LLM_TOKENIZER_ID = "unsloth/Llama-3.2-1B-Instruct"  # instruct variant has the chat template
 GLP_MODEL_ID   = "generative-latent-prior/glp-llama1b-d12-multi"
 JUDGE_MODEL_ID = "meta-llama/Llama-Guard-3-8B"
 # STEER_LAYERS  = [7, 15]
@@ -79,10 +78,7 @@ def generate_responses_batch(
 ) -> list[str]:
     pad_id = llm_tokenizer.pad_token_id
     encoded = [
-        llm_tokenizer.apply_chat_template(
-            [{"role": "user", "content": p}],
-            tokenize=True, add_generation_prompt=True,
-        )
+        llm_tokenizer.encode(p + "\n", add_special_tokens=False)
         for p in prompts
     ]
     encoded = [e[-max_input_tokens:] if len(e) > max_input_tokens else e for e in encoded]
@@ -301,15 +297,7 @@ def collect_answer_mean_acts(
         batch_prompts   = prompts[i : i + batch_size]
         batch_responses = responses[i : i + batch_size]
 
-        # add_generation_prompt=True appends the beginning of assistant response
-        formatted_prompts = [
-            tokenizer.apply_chat_template(
-                [{"role": "user", "content": p}],
-                tokenize=False, add_generation_prompt=True,
-            )
-            for p in batch_prompts
-        ]
-        # the positive/negative assistant response is appended to the prompt format, as continuation
+        formatted_prompts = [p + "\n" for p in batch_prompts]
         full_texts = [fp + r for fp, r in zip(formatted_prompts, batch_responses)]
 
         # prompt token counts (no padding) to locate the response span
@@ -473,13 +461,7 @@ def generate_all_responses(
                 for i in tqdm(range(0, len(prompts), batch_size),
                               desc=f"glp L{layer_idx} α={alpha}"):
                     batch = prompts[i : i + batch_size]
-                    formatted = [
-                        tokenizer.apply_chat_template(
-                            [{"role": "user", "content": p}],
-                            tokenize=False, add_generation_prompt=True,
-                        )
-                        for p in batch
-                    ]
+                    formatted = [p + "\n" for p in batch]
                     gen_out = generate_fn(
                         formatted, llm, tokenizer,
                         layers=[layer_name],
@@ -496,13 +478,7 @@ def generate_all_responses(
                 for i in tqdm(range(0, len(prompts), batch_size),
                               desc=f"L{layer_idx} α={alpha}"):
                     batch = prompts[i : i + batch_size]
-                    formatted = [
-                        tokenizer.apply_chat_template(
-                            [{"role": "user", "content": p}],
-                            tokenize=False, add_generation_prompt=True,
-                        )
-                        for p in batch
-                    ]
+                    formatted = [p + "\n" for p in batch]
                     gen_out = _classic_generate_batch(
                         formatted, llm, tokenizer,
                         layer_idx=layer_idx, sv=sv, alpha=float(alpha),
@@ -746,14 +722,20 @@ def run_shard(args):
 
     # ── Phase 1: Load LLM (+ GLP) ─────────────────────────────────────────────
     print(f"Loading LLM: {LLM_MODEL_ID}")
-    # Load tokenizer from the instruct variant to get the chat template
-    tokenizer = AutoTokenizer.from_pretrained(LLM_TOKENIZER_ID)
+    tokenizer = AutoTokenizer.from_pretrained(LLM_MODEL_ID)
     tokenizer.padding_side = "left"
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
+    from transformers import AutoConfig
+    llm_config = AutoConfig.from_pretrained(LLM_MODEL_ID)
+    # Cap the static causal-mask size. The default 131072 causes a 68+ GiB
+    # mask allocation that OOMs on most GPUs.  We never exceed ~1024 tokens
+    # (512 input + 512 generated), so 2048 is generous.
+    llm_config.max_position_embeddings = 2048
     llm = AutoModelForCausalLM.from_pretrained(
-        LLM_MODEL_ID, torch_dtype=torch.bfloat16
+        LLM_MODEL_ID, torch_dtype=torch.bfloat16,
+        config=llm_config,
     ).to(gen_device)
     llm.eval()
     llm.generation_config.eos_token_id = [128001, 128009]
