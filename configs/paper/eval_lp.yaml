@@ -6,7 +6,7 @@ model: "1b"
 # data_selection: all_semantic  # harmful counterpart from same dataset
 # metric_data: "vanilla_wildjailbreak"
 out_dir: "results/paper-eval-lp"
-num_gpus: 8
+num_gpus: 4
 
 # probe training hyperparameters (used at aggregate time, not extraction time)
 probe_lr: 1e-3
